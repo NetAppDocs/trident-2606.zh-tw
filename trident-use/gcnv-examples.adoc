@@ -1,0 +1,528 @@
+---
+sidebar: sidebar 
+permalink: trident-use/gcnv-examples.html 
+keywords: trident backend, google cloud netapp volumes, nfs volumes, nfs 
+summary: 了解 Google Cloud NetApp Volumes 的 NFS 和 NFS 後端設定選項，並檢視設定範例。 
+---
+= Google Cloud NetApp Volumes 後端設定選項和範例
+:hardbreaks:
+:allow-uri-read: 
+:icons: font
+:imagesdir: ../media/
+
+
+[role="lead"]
+了解 Google Cloud NetApp Volumes 的後端組態選項並檢閱組態範例。
+
+
+
+[[backend-configuration-options]]
+== 後端組態選項
+
+每個後端都在單一 Google Cloud 區域中配置磁碟區。若要在其他區域中建立磁碟區，您可以定義其他後端。
+
+[cols="1, 2, 1"]
+|===
+| 參數 | 說明 | 預設 
+
+
+| `version` |  | 始終為 1 
+
+
+| `storageDriverName` | 儲存驅動程式的名稱 |  `storageDriverName` 的值必須指定為「google-cloud-netapp-volumes」。 
+
+
+| `backendName` | （選用）儲存後端的自訂名稱 | 驅動程式名稱 +"_"+ API 金鑰的一部分 
+
+
+| `storagePools` | 用於指定磁碟區建立之儲存池的選用參數。 |  
+
+
+| `projectNumber` | Google Cloud 帳戶專案編號。該值可在 Google Cloud 入口網站首頁找到。 |  
+
+
+| `location` | Trident 建立 GCNV 磁碟區的 Google Cloud 位置。建立跨區域 Kubernetes 叢集時，在 `location`中建立的磁碟區可用於調度到多個 Google Cloud 區域節點上的工作負載。跨區域流量會產生額外費用。 |  
+
+
+| `apiKey` | 用於具有 `netapp.admin`角色的 Google Cloud 服務帳號的 API 金鑰。它包含 Google Cloud 服務帳號私鑰檔案的 JSON 格式內容（原封不動地複製到後端設定檔中）。 `apiKey`必須包含以下鍵的鍵值對： `type`、 `project_id`、 `client_email`、 `client_id`、 `auth_uri`、 `token_uri`、 `auth_provider_x509_cert_url`和 `client_x509_cert_url`。 |  
+
+
+| `nfsMountOptions` | 對 NFS 掛載選項進行精細控制。 | "nfsvers=3" 
+
+
+| `limitVolumeSize` | 如果請求的磁碟區大小超過此值，則配置失敗。 | " （預設不強制執行） 
+
+
+| `serviceLevel` | 儲存池及其磁碟區的服務等級。取值為 `flex`、 `standard`、 `premium`或 `extreme`。 |  
+
+
+| `labels` | 要套用於磁碟區的任意 JSON 格式標籤集 | "" 
+
+
+| `network` | 用於 Google Cloud NetApp Volumes 磁碟區的 Google Cloud 網路。 |  
+
+
+| `debugTraceFlags` | 用於疑難排解的偵錯旗標。例如 `{"api":false, "method":true}`。除非您正在進行疑難排解並需要詳細的記錄傾印，否則請勿使用此功能。 | null 
+
+
+| `nasType` | 配置 NFS 或 SMB 磁碟區的建立。選項為 `nfs`、 `smb`或 null。設定為 null 則預設建立 NFS 磁碟區。 | `nfs` 
+
+
+| `supportedTopologies` | 表示此後端支援的區域和可用區列表。如需詳細資訊，請參閱 link:../trident-use/csi-topology.html["使用 CSI 拓撲"]。例如：
+`supportedTopologies:
+- topology.kubernetes.io/region: asia-east1
+  topology.kubernetes.io/zone: asia-east1-a` |  
+|===
+
+
+[[volume-provisioning-options]]
+== Volume 配置選項
+
+您可以在設定檔的  `defaults` 區段中控制預設磁碟區配置。
+
+[cols=",,"]
+|===
+| 參數 | 說明 | 預設 
+
+
+| `exportRule` | 新磁碟區的匯出規則。必須是以逗號分隔的 IPv4 位址列表，位址可以任意組合。 | "0.0.0.0/0" 
+
+
+| `snapshotDir` | 存取  `.snapshot` 目錄 | `true`,  `false`（預設行為可能有所不同。請明確設定）NFSv3 設定為 "false" 
+
+
+| `snapshotReserve` | 為快照保留的磁碟區百分比 | ""（接受預設值 0） 
+
+
+| `unixPermissions` | 新磁碟區的 unix 權限（4 位八進位數字）。 | "" 
+|===
+
+
+[[example-configurations]]
+== 範例組態
+
+以下範例展示了基本配置，其中大多數參數都保留預設值。這是定義後端最簡單的方法。
+
+.最小組態
+[%collapsible]
+====
+這是絕對最小的後端組態。使用此組態，Trident 會在已設定的位置中，發現所有委派給 Google Cloud NetApp Volumes 的儲存資源池，並隨機將新磁碟區放置在其中一個資源池上。由於 `nasType`被省略， `nfs`預設值會套用，後端將會佈建 NFS 磁碟區。
+
+如果您剛開始使用 Google Cloud NetApp Volumes 並進行嘗試，此配置是理想的選擇，但在實踐中，您可能需要為配置的磁碟區提供額外的範圍。
+
+
+NOTE: 請將 `<id_value>`和 `<key_value>`替換為您的服務帳戶憑證。
+
+[source, yaml]
+----
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: backend-tbc-gcnv-secret
+type: Opaque
+stringData:
+  private_key_id: "<id_value>"
+  private_key: |
+    -----BEGIN PRIVATE KEY-----
+    <key_value>
+    -----END PRIVATE KEY-----
+---
+apiVersion: trident.netapp.io/v1
+kind: TridentBackendConfig
+metadata:
+  name: backend-tbc-gcnv
+spec:
+  version: 1
+  storageDriverName: google-cloud-netapp-volumes
+  projectNumber: "123455380079"
+  location: europe-west6
+  serviceLevel: premium
+  apiKey:
+    type: service_account
+    project_id: my-gcnv-project
+    client_email: myproject-prod@my-gcnv-project.iam.gserviceaccount.com
+    client_id: "103346282737811234567"
+    auth_uri: https://accounts.google.com/o/oauth2/auth
+    token_uri: https://oauth2.googleapis.com/token
+    auth_provider_x509_cert_url: https://www.googleapis.com/oauth2/v1/certs
+    client_x509_cert_url: https://www.googleapis.com/robot/v1/metadata/x509/myproject-prod%40my-gcnv-project.iam.gserviceaccount.com
+  credentials:
+    name: backend-tbc-gcnv-secret
+----
+====
+.SMB 磁碟區配置
+[%collapsible]
+====
+[source, yaml]
+----
+apiVersion: trident.netapp.io/v1
+kind: TridentBackendConfig
+metadata:
+  name: backend-tbc-gcnv1
+  namespace: trident
+spec:
+  version: 1
+  storageDriverName: google-cloud-netapp-volumes
+  projectNumber: "123456789"
+  location: asia-east1
+  serviceLevel: flex
+  nasType: smb
+  apiKey:
+    type: service_account
+    project_id: cloud-native-data
+    client_email: trident-sample@cloud-native-data.iam.gserviceaccount.com
+    client_id: "123456789737813416734"
+    auth_uri: https://accounts.google.com/o/oauth2/auth
+    token_uri: https://oauth2.googleapis.com/token
+    auth_provider_x509_cert_url: https://www.googleapis.com/oauth2/v1/certs
+    client_x509_cert_url: https://www.googleapis.com/robot/v1/metadata/x509/trident-sample%40cloud-native-data.iam.gserviceaccount.com
+  credentials:
+    name: backend-tbc-gcnv-secret
+----
+====
+.使用 StoragePools 篩選器進行組態設定
+[%collapsible]
+====
+[source, yaml]
+----
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: backend-tbc-gcnv-secret
+type: Opaque
+stringData:
+  private_key_id: "<id_value>"
+  private_key: |
+    -----BEGIN PRIVATE KEY-----
+    <key_value>
+    -----END PRIVATE KEY-----
+---
+
+---
+apiVersion: trident.netapp.io/v1
+kind: TridentBackendConfig
+metadata:
+  name: backend-tbc-gcnv
+spec:
+  version: 1
+  storageDriverName: google-cloud-netapp-volumes
+  projectNumber: "123455380079"
+  location: europe-west6
+  serviceLevel: premium
+  storagePools:
+    - premium-pool1-europe-west6
+    - premium-pool2-europe-west6
+  apiKey:
+    type: service_account
+    project_id: my-gcnv-project
+    client_email: myproject-prod@my-gcnv-project.iam.gserviceaccount.com
+    client_id: "103346282737811234567"
+    auth_uri: https://accounts.google.com/o/oauth2/auth
+    token_uri: https://oauth2.googleapis.com/token
+    auth_provider_x509_cert_url: https://www.googleapis.com/oauth2/v1/certs
+    client_x509_cert_url: https://www.googleapis.com/robot/v1/metadata/x509/myproject-prod%40my-gcnv-project.iam.gserviceaccount.com
+  credentials:
+    name: backend-tbc-gcnv-secret
+----
+====
+.虛擬資源池組態
+[%collapsible]
+====
+此後端組態在單一檔案中定義了多個虛擬資源池。虛擬資源池在 `storage`區段中定義。當您有多個支援不同服務層級的儲存資源池、並想在 Kubernetes 中建立代表這些資源池的儲存類別時、虛擬資源池非常實用。虛擬資源池標籤用於區分資源池。例如、在以下範例中、 `performance`標籤和 `serviceLevel`類型用於區分虛擬資源池。
+
+您也可以設定一些適用於所有虛擬池的預設值，並覆寫各個虛擬池的預設值。在下列範例中， `snapshotReserve` 和  `exportRule` 做為所有虛擬池的預設值。
+
+如需詳細資訊，請參閱 link:../trident-concepts/virtual-storage-pool.html["虛擬資源池"]。
+
+[source, yaml]
+----
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: backend-tbc-gcnv-secret
+type: Opaque
+stringData:
+  private_key_id: "<id_value>"
+  private_key: |
+    -----BEGIN PRIVATE KEY-----
+    <key_value>
+    -----END PRIVATE KEY-----
+
+---
+apiVersion: trident.netapp.io/v1
+kind: TridentBackendConfig
+metadata:
+  name: backend-tbc-gcnv
+spec:
+  version: 1
+  storageDriverName: google-cloud-netapp-volumes
+  projectNumber: "123455380079"
+  location: europe-west6
+  apiKey:
+    type: service_account
+    project_id: my-gcnv-project
+    client_email: myproject-prod@my-gcnv-project.iam.gserviceaccount.com
+    client_id: "103346282737811234567"
+    auth_uri: https://accounts.google.com/o/oauth2/auth
+    token_uri: https://oauth2.googleapis.com/token
+    auth_provider_x509_cert_url: https://www.googleapis.com/oauth2/v1/certs
+    client_x509_cert_url: https://www.googleapis.com/robot/v1/metadata/x509/myproject-prod%40my-gcnv-project.iam.gserviceaccount.com
+  credentials:
+    name: backend-tbc-gcnv-secret
+  defaults:
+    snapshotReserve: "10"
+    exportRule: 10.0.0.0/24
+  storage:
+    - labels:
+        performance: extreme
+      serviceLevel: extreme
+      defaults:
+        snapshotReserve: "5"
+        exportRule: 0.0.0.0/0
+    - labels:
+        performance: premium
+      serviceLevel: premium
+    - labels:
+        performance: standard
+      serviceLevel: standard
+----
+====
+.GKE 的雲端身分
+[%collapsible]
+====
+當您使用 GKE 雲端身分安裝 Trident 時，後端會以工作負載身分進行驗證，並省略 `apiKey`區塊。Google Cloud NetApp Volumes 驅動程式的雲端身分配置方式相同。唯一的差異在於 `storageDriverName`值：NAS（NFS 或 SMB）磁碟區使用 `google-cloud-netapp-volumes`，SAN（iSCSI 區塊）磁碟區使用 `google-cloud-netapp-volumes-san`。
+
+
+NOTE: 驅動程式對雲端身分的支援需要 Trident 26.06 或更高版本。 `google-cloud-netapp-volumes-san`SAN 磁碟區是從 Flex Unified 儲存池中佈建的，因此請將 `serviceLevel`設定為 `flex`。
+
+.NAS 驅動程式（<code>google-cloud-netapp-volumes</code>）
+[source, yaml]
+----
+apiVersion: trident.netapp.io/v1
+kind: TridentBackendConfig
+metadata:
+  name: backend-tbc-gcp-gcnv
+spec:
+  version: 1
+  storageDriverName: google-cloud-netapp-volumes
+  projectNumber: '012345678901'
+  network: gcnv-network
+  location: us-west2
+  serviceLevel: Premium
+  storagePool: pool-premium1
+----
+.SAN 驅動程式（<code>google-cloud-netapp-volumes-san</code>）
+[source, yaml]
+----
+apiVersion: trident.netapp.io/v1
+kind: TridentBackendConfig
+metadata:
+  name: backend-tbc-gcp-gcnv-san
+spec:
+  version: 1
+  storageDriverName: google-cloud-netapp-volumes-san
+  projectNumber: '012345678901'
+  network: gcnv-network
+  location: us-west2
+  serviceLevel: flex
+  storagePool: pool-flex1
+----
+====
+.支援的拓撲組態
+[%collapsible]
+====
+Trident 能夠根據區域和可用區為工作負載配置磁碟區。 `supportedTopologies`此後端配置中的程式碼區塊用於為每個後端提供區域和可用區清單。此處指定的區域和可用區值必須與每個 Kubernetes 叢集節點標籤中的區域和可用區值相符。這些區域和可用區代表儲存類別中可以提供的允許值清單。對於包含後端提供的區域和可用區子集的儲存類， Trident 會在指定的區域和可用區中建立磁碟區。如需詳細資訊，請參閱 link:../trident-use/csi-topology.html["使用 CSI 拓撲"]。
+
+[source, yaml]
+----
+---
+version: 1
+storageDriverName: google-cloud-netapp-volumes
+subscriptionID: 9f87c765-4774-fake-ae98-a721add45451
+tenantID: 68e4f836-edc1-fake-bff9-b2d865ee56cf
+clientID: dd043f63-bf8e-fake-8076-8de91e5713aa
+clientSecret: SECRET
+location: asia-east1
+serviceLevel: flex
+supportedTopologies:
+  - topology.kubernetes.io/region: asia-east1
+    topology.kubernetes.io/zone: asia-east1-a
+  - topology.kubernetes.io/region: asia-east1
+    topology.kubernetes.io/zone: asia-east1-b
+
+----
+====
+
+
+[[whats-next]]
+== 接下來呢？
+
+建立後端組態檔後，執行以下命令：
+
+[listing]
+----
+kubectl create -f <backend-file>
+----
+若要驗證後端是否已成功建立，請執行下列命令：
+
+[listing]
+----
+kubectl get tridentbackendconfig
+
+NAME               BACKEND NAME       BACKEND UUID                           PHASE   STATUS
+backend-tbc-gcnv   backend-tbc-gcnv   b2fd1ff9-b234-477e-88fd-713913294f65   Bound   Success
+----
+如果後端建立失敗，則表示後端配置存在問題。您可以使用  `kubectl get tridentbackendconfig <backend-name>` 命令描述後端，或執行以下命令查看日誌以確定原因：
+
+[listing]
+----
+tridentctl logs
+----
+在您識別並修正組態檔的問題後、您可以刪除後端並再次執行 create 命令。
+
+
+
+[[storage-class-definitions]]
+== 儲存類別定義
+
+以下是參照上述後端的基本 `StorageClass`定義。
+
+[source, yaml]
+----
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: gcnv-nfs-sc
+provisioner: csi.trident.netapp.io
+parameters:
+  backendType: "google-cloud-netapp-volumes"
+----
+*使用  `parameter.selector` 欄位的範例定義：*
+
+使用  `parameter.selector` 您可以為每個  `StorageClass` 指定用於託管磁碟區的 link:../trident-concepts/virtual-storage-pool.html["虛擬資源池"]。此磁碟區將具有所選儲存池中定義的設定項。
+
+[source, yaml]
+----
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: extreme-sc
+provisioner: csi.trident.netapp.io
+parameters:
+  selector: performance=extreme
+  backendType: google-cloud-netapp-volumes
+
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: premium-sc
+provisioner: csi.trident.netapp.io
+parameters:
+  selector: performance=premium
+  backendType: google-cloud-netapp-volumes
+
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: standard-sc
+provisioner: csi.trident.netapp.io
+parameters:
+  selector: performance=standard
+  backendType: google-cloud-netapp-volumes
+----
+如需儲存類別的詳細資訊，請參閱 link:../trident-use/create-stor-class.html["建立儲存類別"^]。
+
+
+
+[[example-definitions-for-smb-volumes]]
+=== SMB 磁碟區的範例定義
+
+使用 `nasType` `node-stage-secret-name`和 `node-stage-secret-namespace`，您可以指定 SMB 磁碟區並提供所需的 Active Directory 憑證。任何具有任意權限或無權限的 Active Directory 使用者名稱/密碼均可用作節點階段金鑰。
+
+.預設命名空間上的基本組態
+[%collapsible]
+====
+[source, yaml]
+----
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: gcnv-sc-smb
+provisioner: csi.trident.netapp.io
+parameters:
+  backendType: "google-cloud-netapp-volumes"
+  trident.netapp.io/nasType: "smb"
+  csi.storage.k8s.io/node-stage-secret-name: "smbcreds"
+  csi.storage.k8s.io/node-stage-secret-namespace: "default"
+----
+====
+.每個命名空間使用不同的機密
+[%collapsible]
+====
+[source, yaml]
+----
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: gcnv-sc-smb
+provisioner: csi.trident.netapp.io
+parameters:
+  backendType: "google-cloud-netapp-volumes"
+  trident.netapp.io/nasType: "smb"
+  csi.storage.k8s.io/node-stage-secret-name: "smbcreds"
+  csi.storage.k8s.io/node-stage-secret-namespace: ${pvc.namespace}
+----
+====
+.每個磁碟區使用不同的機密
+[%collapsible]
+====
+[source, yaml]
+----
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: gcnv-sc-smb
+provisioner: csi.trident.netapp.io
+parameters:
+  backendType: "google-cloud-netapp-volumes"
+  trident.netapp.io/nasType: "smb"
+  csi.storage.k8s.io/node-stage-secret-name: ${pvc.name}
+  csi.storage.k8s.io/node-stage-secret-namespace: ${pvc.namespace}
+----
+====
+
+NOTE: `nasType: smb` 篩選支援 SMB 磁碟區的儲存池。 `nasType: nfs` 或  `nasType: null` 篩選 NFS 儲存池。
+
+
+
+[[pvc-definition-example]]
+=== PVC 定義範例
+
+[source, yaml]
+----
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: gcnv-nfs-pvc
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 100Gi
+  storageClassName: gcnv-nfs-sc
+----
+若要驗證 PVC 是否已繫結，請執行下列命令：
+
+[listing]
+----
+kubectl get pvc gcnv-nfs-pvc
+
+NAME          STATUS   VOLUME                                    CAPACITY  ACCESS MODES   STORAGECLASS AGE
+gcnv-nfs-pvc  Bound    pvc-b00f2414-e229-40e6-9b16-ee03eb79a213  100Gi     RWX            gcnv-nfs-sc  1m
+----

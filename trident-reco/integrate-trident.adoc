@@ -1,0 +1,433 @@
+---
+sidebar: sidebar 
+permalink: trident-reco/integrate-trident.html 
+keywords: kubernetes, clusters, nodes, components, master, compute, fsx, flexgroup, flexvolume, solidfire, hci, virtual pool 
+summary: Kubernetes 叢集通常由兩種類型的節點組成，每種節點負責不同的功能方面。 
+---
+= 將 Trident 與 Kubernetes 整合
+:hardbreaks:
+:allow-uri-read: 
+:icons: font
+:imagesdir: ../media/
+
+
+[role="lead"]
+要整合 Trident，需要整合以下設計和架構元素：驅動程式選擇和部署、儲存類別設計、虛擬池設計、持久性磁碟區聲明 (PVC) 對儲存配置的影響、磁碟區操作以及使用 Trident 部署 OpenShift 服務。
+
+
+
+[[driver-selection-and-deployment]]
+== 驅動程式選擇與部署
+
+為您的儲存系統選擇並部署後端驅動程式。
+
+
+
+[[ontap-backend-drivers]]
+=== ONTAP 後端驅動程式
+
+ONTAP 後端驅動程式之間的差異在於所使用的傳輸協定以及磁碟區在儲存系統上的配置方式。因此，在決定部署哪個驅動程式時，請務必仔細考慮。
+
+從更高層次來看，如果您的應用程式包含需要共用儲存的元件（多個 Pod 存取同一個 PVC），則基於 NAS 的驅動程式是預設選擇；而基於區塊的 iSCSI 驅動程式則符合非共用儲存的需求。協議的選擇應基於應用程式的需求以及儲存和基礎架構團隊的熟悉程度。一般來說，對於大多數應用程式而言，兩者之間的差異很小，因此通常取決於是否需要共用儲存（即多個 Pod 需要同時存取）。
+
+可用的 ONTAP 後端驅動程式包括：
+
+* `ontap-nas`：每個已配置的 PV 都是一個完整的 ONTAP FlexVolume。
+* `ontap-nas-economy`：每個已配置的 PV 都是一個 qtree，每個 FlexVolume 可配置的 qtree 數量（預設值為 200）。
+* `ontap-nas-flexgroup`：每個 PV 都配置為完整的 ONTAP FlexGroup，並且分配給 SVM 的所有聚合都將被使用。
+* `ontap-san`：每個已配置的 PV 都是其自身 FlexVolume 內部的一個 LUN。
+* `ontap-san-economy`：每個已佈建的 PV 都是一個 LUN，每個 FlexVolume 可配置的 LUN 數量（預設值為 100）。
+
+
+在三個 NAS 驅動程式之間進行選擇會對應用程式可用的功能產生一些影響。
+
+請注意，下表中的並非所有功能都透過 Trident 公開。如果需要該功能，則必須由儲存管理員在配置後套用其中一些功能。上標腳註區分了每個功能和驅動程式的功能。
+
+[cols="20,10,10,10,10,10,10,10"]
+|===
+| ONTAP NAS 驅動程式 | 快照 | 複本 | 動態匯出原則 | 多重附加 | QoS | 調整大小 | 複寫 
+
+
+| `ontap-nas` | 是的 | 是的 | 是 | 是的 | 是 | 是的 | 是 
+
+
+| `ontap-nas-economy` | NOfootnote:3[] | NOfootnote:3[] | 是 | 是的 | NOfootnote:3[] | 是的 | NOfootnote:3[] 
+
+
+| `ontap-nas-flexgroup` | 是 | 否 | 是 | 是的 | 是 | 是的 | 是 
+|===
+Trident 為 ONTAP 提供 2 個 SAN 驅動程式，其功能如下所示。
+
+[cols="20,10,10,10,10,10,10,10"]
+|===
+| ONTAP SAN 驅動程式 | 快照 | 複本 | 多重附加 | 雙向 CHAP | QoS | 調整大小 | 複寫 
+
+
+| `ontap-san` | 是的 | 是的 | 是 | 是的 | 是 | 是的 | 是 
+
+
+| `ontap-san-economy` | 是的 | 是的 | 是 | 是的 | NOfootnote:3[] | 是的 | NOfootnote:3[] 
+|===
+[verse]
+以上表格的註腳：Yesfootnote:1[]：非 Trident 管理 Yesfootnote:2[]：由 Trident 管理，但不支援 PV 粒度 NOfootnote:3[]：非 Trident 管理且不支援 PV 粒度 Yesfootnote:4[]：支援原始區塊磁碟區 Yesfootnote:5[]：由 Trident 支援
+
+非 PV 粒度的功能會套用至整個 FlexVolume 和所有 PV（即共享 FlexVols 中的 qtree 或 LUN），並將共用一個共同的排程。
+
+如上表所示、 `ontap-nas`和 `ontap-nas-economy`之間的許多功能都是相同的。但是、由於 `ontap-nas-economy`驅動程式限制了以每個 PV 精細度控制排程的能力、這可能會特別影響您的災難恢復和備份規劃。對於希望在 ONTAP 儲存設備上利用 PVC 複製功能的開發團隊、只有在使用 `ontap-nas`、 `ontap-san`或 `ontap-san-economy`驅動程式時才有可能。
+
+
+NOTE: 該 `solidfire-san` 驅動程式還能夠克隆 PVC 。
+
+
+
+[[cloud-volumes-ontap-backend-drivers]]
+=== Cloud Volumes ONTAP 後端驅動程式
+
+Cloud Volumes ONTAP 提供資料控制以及企業級儲存功能，適用於各種使用案例，包括檔案共用和區塊層級儲存，並支援 NAS 和 SAN 協定（NFS、SMB / CIFS 和 iSCSI）。Cloud Volumes ONTAP 的相容驅動程式為 `ontap-nas`、 `ontap-nas-economy`、 `ontap-san`和 `ontap-san-economy`。這些適用於 Cloud Volumes ONTAP for Azure、Cloud Volumes ONTAP for GCP。
+
+
+
+[[amazon-fsx-for-ontap-backend-drivers]]
+=== Amazon FSx for ONTAP 後端驅動程式
+
+Amazon FSx for NetApp ONTAP 讓您能夠利用您熟悉的 NetApp 特性、效能和管理功能，同時享受在 AWS 上儲存資料的簡易性、敏捷性、安全性和可擴充性。FSx for ONTAP 支援許多 ONTAP 檔案系統特性和管理 API。Cloud Volume ONTAP 的相容驅動程式包括 `ontap-nas`、 `ontap-nas-economy`、 `ontap-nas-flexgroup`、 `ontap-san` 和 `ontap-san-economy`。
+
+
+
+[[netapp-hcisolidfire-backend-drivers]]
+=== NetApp HCI/SolidFire 後端驅動程式
+
+ `solidfire-san`與 NetApp HCI/SolidFire 平台配合使用的驅動程式可協助管理員根據 QoS 限制為 Trident 配置 Element 後端。如果您希望設計後端以對 Trident 配置的磁碟區設定特定的 QoS 限制，請在後端檔案中使用 `type`參數。管理員也可以使用 `limitVolumeSize`參數限制儲存上可建立的磁碟區大小。目前， `solidfire-san`驅動程式不支援 Element 儲存功能，例如磁碟區調整大小和磁碟區複製。這些操作需要透過 Element Software Web UI 手動完成。
+
+[cols="20,10,10,10,10,10,10,10"]
+|===
+| SolidFire 驅動程式 | 快照 | 複本 | 多重附加 | CHAP | QoS | 調整大小 | 複寫 
+
+
+| `solidfire-san` | 是的 | 是的 | 是 footnote:2[] | 是的 | 是的 | 是的 | 是 
+|===
+[verse]
+註腳：Yesfootnote:1[]：不由 Trident 管理 Yesfootnote:2[]：支援原始區塊磁碟區
+
+
+
+[[azure-netapp-files-backend-drivers]]
+=== Azure NetApp Files 後端驅動程式
+
+Trident 使用  `azure-netapp-files` 驅動程式來管理 link:https://azure.microsoft.com/en-us/products/netapp/["Azure NetApp Files"^] 服務。
+
+有關此驅動程式及其配置方法的更多資訊，請參見 link:https://docs.netapp.com/us-en/trident/trident-use/anf.html["Azure NetApp Files 的 Trident 後端組態"^]。
+
+[cols="20,10,10,10,10,10,10"]
+|===
+| Azure NetApp Files 驅動程式 | 快照 | 複本 | 多重附加 | QoS | 展開 | 複寫 
+
+
+| `azure-netapp-files` | 是的 | 是的 | 是的 | 是的 | 是的 | 是 
+|===
+[verse]
+註腳：是註腳：1[]：非由 Trident 管理
+
+
+
+[[storage-class-design]]
+== 儲存類別設計
+
+需要配置並套用個別儲存類別，才能建立 Kubernetes Storage Class 物件。本節將討論如何為您的應用程式設計儲存類別。
+
+
+
+[[specific-backend-utilization]]
+=== 特定後端使用率
+
+在特定的儲存類別物件中可以使用篩選功能來確定要與該特定儲存類別一起使用的儲存池或儲存池集合。可以在儲存類別中設定三組過濾器： `storagePools`、 `additionalStoragePools` 和/或  `excludeStoragePools`。
+
+ `storagePools` 參數有助於將儲存空間限制在符合任何指定屬性的儲存池集合中。 `additionalStoragePools` 參數用於擴展 Trident 用於資源配置的儲存池集合，以及透過屬性和  `storagePools` 參數選擇的儲存池集合。您可以單獨使用任一參數，也可以同時使用兩個參數，以確保選擇合適的儲存池集合。
+
+ `excludeStoragePools`參數用於專門排除符合屬性的已列出資源池集合。
+
+
+
+[[emulate-qos-policies]]
+=== 模擬 QoS 原則
+
+如果您希望設計儲存類別來模擬服務品質政策，請建立一個儲存類別，並將 `media`屬性設為 `hdd`或 `ssd`。根據儲存類別中提及的 `media`屬性，Trident 將選擇適當的後端來提供 `hdd`或 `ssd`集合體以符合媒體屬性，然後將磁碟區的配置導向至特定的集合體。因此，我們可以建立一個名為 PREMIUM 的儲存類別，其 `media`屬性設為 `ssd`，這可以歸類為 PREMIUM QoS 政策。我們可以建立另一個名為 STANDARD 的儲存類別，其媒體屬性設為 `hdd`，這可以歸類為 STANDARD QoS 政策。我們也可以使用儲存類別中的 `IOPS` 屬性將配置重新導向至 Element 設備，這可以定義為 QoS 政策。
+
+
+
+[[utilize-backend-based-on-specific-features]]
+=== 根據特定功能使用後端
+
+儲存類別可以設計用於指導在特定後端上進行磁碟區配置，這些後端啟用了精簡配置、厚配置、快照、複製和加密等功能。若要指定要使用的儲存，請建立儲存類別，並指定啟用了所需功能的相應後端。
+
+
+
+[[virtual-pools]]
+=== 虛擬資源池
+
+所有 Trident 後端均可使用虛擬資源池。您可以使用 Trident 提供的任何驅動程式、為任何後端定義虛擬資源池。
+
+虛擬池允許管理員在後端之上建立一層抽象層，並透過 Storage Classes 來引用這些後端，從而提高磁碟區在後端上的部署靈活性和效率。不同的後端可以使用相同的服務類別。此外，可以在同一個後端上建立多個具有不同特性的儲存池。當使用具有特定標籤的選擇器配置 Storage Class 時，Trident 會選擇一個與所有選擇器標籤都相符的後端來部署磁碟區。如果 Storage Class 選擇器標籤符合多個儲存池，Trident 將從中選擇其中一個來配置磁碟區。
+
+
+
+[[virtual-pool-design]]
+== 虛擬資源池設計
+
+在建立後端時，您通常可以指定一組參數。管理員無法使用相同的儲存憑證並搭配不同的參數組來建立另一個後端。隨著虛擬資源池的引入，這個問題已經得到緩解。虛擬資源池是在後端與 Kubernetes Storage Class 之間引入的一層抽象，讓管理員可以定義參數及標籤，這些標籤可以透過 Kubernetes Storage Classes 作為選擇器來引用，並且與後端無關。虛擬資源池可以為所有支援的 NetApp 後端與 Trident 一起定義。該清單包括 SolidFire/NetApp HCI、ONTAP，以及 Azure NetApp Files。
+
+
+NOTE: 定義虛擬資源池時，建議不要嘗試在後端定義中重新排列現有虛擬資源池的順序。此外，也不建議編輯 / 修改現有虛擬資源池的屬性，而是定義一個新的虛擬資源池。
+
+
+
+[[emulating-different-service-levelsqos]]
+=== 模擬不同的服務等級 / QoS
+
+可以設計虛擬池來模擬服務類別。使用 Cloud Volume Service for Azure NetApp Files 的虛擬池實作，讓我們來探討如何設定不同的服務類別。使用多個標籤設定 Azure NetApp Files 後端，代表不同的效能等級。將 `servicelevel`方面設定為適當的效能等級，並在每個標籤下新增其他所需的方面。現在建立不同的 Kubernetes Storage Classes，對應到不同的虛擬池。使用 `parameters.selector`欄位，每個 StorageClass 會指定哪些虛擬池可用於託管磁碟區。
+
+
+
+[[assigning-specific-set-of-aspects]]
+=== 指定特定的層面集
+
+可以從單一儲存後端設計多個具有特定屬性的虛擬儲存池。為此、請為後端配置多個標籤、並在每個標籤下設定所需的屬性。現在使用  `parameters.selector` 欄位建立不同的 Kubernetes Storage Classes、以對應到不同的虛擬儲存池。在後端配置的磁碟區將具有所選虛擬儲存池中定義的屬性。
+
+
+
+[[pvc-characteristics-which-affect-storage-provisioning]]
+=== 影響儲存資源配置的 PVC 特性
+
+在建立 PVC 時，要求的儲存類別以外的某些參數可能會影響 Trident 配置決策過程。
+
+
+
+[[access-mode]]
+=== 存取模式
+
+透過 PVC 請求儲存時，必填欄位之一是存取模式。所需的模式可能會影響選擇用於託管儲存請求的後端。
+
+Trident 將嘗試根據下列矩陣將所使用的儲存協定與指定的存取方法進行比對。這與底層儲存平台無關。
+
+[cols="20,30,30,30"]
+|===
+|  | ReadWriteOnce | ReadOnlyMany | ReadWriteMany 
+
+
+| iSCSI | 是的 | 是的 | 是（Raw block） 
+
+
+| NFS | 是的 | 是的 | 是的 
+|===
+如果向未配置 NFS 後端的 Trident 部署提交 ReadWriteMany PVC 請求，則不會建立任何磁碟區。因此，請求者應使用適合其應用程式的存取模式。
+
+
+
+[[volume-operations]]
+== 磁碟區作業
+
+
+
+[[modify-persistent-volumes]]
+=== 修改持續磁碟區
+
+持久性磁碟區在 Kubernetes 中除兩種例外情況外，都是不可變物件。創建後，可以修改其回收策略和大小。但是，這並不妨礙在 Kubernetes 外部修改磁碟區的某些方面。這樣做可能有助於為特定應用程式定製磁碟區，確保容量不會被意外耗盡，或者只是為了將磁碟區遷移到不同的儲存控制器。
+
+
+NOTE: 目前，Kubernetes 內建的配置器不支援對 NFS、iSCSI 或 FC PV 進行磁碟區大小調整操作。Trident 支援擴充 NFS、iSCSI 和 FC 磁碟區。
+
+PV 的連線詳細資料在建立後無法修改。
+
+
+
+[[create-on-demand-volume-snapshots]]
+=== 建立隨需磁碟區快照
+
+Trident 支援隨需建立 Volume 快照，並可使用 CSI 架構從快照建立 PVC。快照提供了一種便捷的方法來維護資料的時間點複本，並且其生命週期獨立於 Kubernetes 中的來源 PV。這些快照可用於複製 PVC。
+
+
+
+[[create-volumes-from-snapshots]]
+=== 從快照建立磁碟區
+
+Trident 也支援從磁碟區快照建立PersistentVolumes。為此、只需建立PersistentVolumeClaim並提及 `datasource`作為需要從中建立磁碟區的所需快照。Trident 將使用快照中存在的資料建立磁碟區來處理此 PVC。透過此功能、可以跨區域複製資料、建立測試環境、完整替換損壞或毀損的正式作業磁碟區、或擷取特定檔案和目錄並將其傳輸到另一個附加的磁碟區。
+
+
+
+[[move-volumes-in-the-cluster]]
+=== 在叢集中移動磁碟區
+
+儲存管理員可以在 ONTAP 叢集中無中斷地將磁碟區在聚合和控制器之間移動，而不會對儲存使用者造成任何影響。只要目標聚合是 Trident 使用的 SVM 可以存取的聚合，此操作就不會影響 Trident 或 Kubernetes 叢集。需要注意的是，如果聚合是新添加到 SVM 的，則需要透過將其重新新增至 Trident 來重新整理後端。這將觸發 Trident 重新清點 SVM，以便識別新聚合。
+
+然而，Trident 不支援在後端之間自動移動磁碟區。這包括在同一叢集中的 SVM 之間、叢集之間，或移動到不同的儲存平台（即使該儲存系統已連接到 Trident）。
+
+如果將磁碟區複製到另一個位置，則可以使用磁碟區匯入功能將目前磁碟區匯入到 Trident 。
+
+
+
+[[expand-volumes]]
+=== 擴充磁碟區
+
+Trident 支援調整 NFS、iSCSI 和 FC PV 的大小。這使用戶能夠直接透過 Kubernetes 層調整磁碟區的大小。所有主流 NetApp 儲存平台（包括 ONTAP 和 SolidFire/NetApp HCI 後端）均支援磁碟區擴充。為了允許日後擴展，請在與磁碟區關聯的 StorageClass 中將  `allowVolumeExpansion` 設定為  `true`。每當需要調整 Persistent Volume 的大小時，請將 Persistent Volume Claim 中的  `spec.resources.requests.storage` 註解編輯為所需的磁碟區大小。Trident 將自動處理儲存叢集上的磁碟區大小調整。
+
+
+
+[[import-an-existing-volume-into-kubernetes]]
+=== 將現有磁碟區匯入 Kubernetes
+
+磁碟區匯入功能可將現有儲存磁碟區匯入 Kubernetes 環境。目前 `ontap-nas`、 `ontap-nas-flexgroup`、 `solidfire-san`和 `azure-netapp-files`驅動程式支援此功能。此功能在將現有應用程式移植到 Kubernetes 或災難恢復情境中非常實用。
+
+使用 ONTAP 和 `solidfire-san`驅動程式時，請使用指令 `tridentctl import volume <backend-name> <volume-name> -f /path/pvc.yaml`將現有磁碟區匯入 Kubernetes 以便由 Trident 管理。匯入磁碟區指令中使用的 PVC YAML 或 JSON 檔案指向一個儲存類別，該儲存類別會將 Trident 識別為佈建程式。使用 NetApp HCI/SolidFire 後端時，請確保磁碟區名稱是唯一的。如果磁碟區名稱重複，請將磁碟區複製為唯一名稱，以便磁碟區匯入功能能夠區分它們。
+
+如果使用 `azure-netapp-files`驅動程式，請使用命令 `tridentctl import volume <backend-name> <volume path> -f /path/pvc.yaml`將磁碟區匯入 Kubernetes 以便由 Trident 管理。這樣可以確保磁碟區參照的唯一性。
+
+執行上述指令後、 Trident 將在後端尋找磁碟區並讀取其大小。它會自動新增（必要時會覆蓋）已配置 PVC 的磁碟區大小。然後、 Trident 會建立新的 PV 、 Kubernetes 會將 PVC 綁定到該 PV 。
+
+如果容器的部署需要特定的匯入 PVC，則該容器將保持待處理狀態，直到透過磁碟區匯入流程綁定 PVC/PV 對。PVC/PV 對綁定後，如果沒有其他問題，容器即可啟動。
+
+
+
+[[registry-service]]
+=== 登錄服務
+
+註冊表的部署和管理儲存已在 link:https://netapp.io/["netapp.io"^] 的 link:https://netapp.io/2017/08/24/deploying-the-openshift-registry-using-netapp-storage/["部落格"^] 中記錄。
+
+
+
+[[logging-service]]
+=== 日誌服務
+
+與其他 OpenShift 服務一樣，日誌服務也使用 Ansible 進行部署，設定參數由提供給 playbook 的清單檔案（也稱為 hosts）提供。將介紹兩種安裝方法：在初始 OpenShift 安裝期間部署日誌服務，以及在 OpenShift 安裝完成後部署日誌服務。
+
+
+CAUTION: 從 Red Hat OpenShift 3.9 版本開始，官方文件建議不要使用 NFS 作為日誌服務，因為有資料損壞的風險。這是基於 Red Hat 對其產品的測試結果。ONTAP NFS 伺服器不存在這些問題，可以輕鬆支援日誌部署。最終，日誌服務的協定選擇取決於您，但需要注意的是，這兩種協定在使用 NetApp 平台時都能很好地工作，如果您偏好 NFS，則沒有理由避免使用 NFS。
+
+如果選擇將 NFS 與日誌服務一起使用，則需要設定 Ansible 變數 `openshift_enable_unsupported_configurations`為 `true`以防止安裝程序失敗。
+
+
+
+==== 開始使用
+
+日誌服務可以選擇性地部署在應用程式和 OpenShift 叢集的核心操作上。如果您選擇部署操作日誌服務，透過指定變數  `openshift_logging_use_ops` 為  `true`，系統將建立兩個服務實例。控制操作日誌實例的變數包含「ops」參數，而控制應用程式日誌實例的變數則不包含。
+
+根據部署方法配置 Ansible 變數至關重要，以確保底層服務使用正確的儲存。讓我們來看看每種部署方法的選項。
+
+
+NOTE: 下表僅包含與日誌服務相關的儲存配置變數。您可以在 link:https://docs.redhat.com/en/documentation/openshift_container_platform/3.11/html/configuring_clusters/install-config-aggregate-logging-sizing["Red Hat OpenShift 日誌文檔"^] 中找到其他選項，這些選項應根據您的部署情況進行檢視、配置和使用。
+
+下表中的變數將使 Ansible playbook 使用提供的詳細資訊為日誌服務建立 PV 和 PVC 。與 OpenShift 安裝後使用元件安裝 playbook 相比，此方法彈性要差得多，但如果您已有可用的磁碟區，則此方法也是一種選擇。
+
+[cols="40,40"]
+|===
+| 變數 | 詳細資料 
+
+
+| `openshift_logging_storage_kind` | 設定為  `nfs` 讓安裝程式為日誌服務建立 NFS PV。 
+
+
+| `openshift_logging_storage_host` | NFS 主機的主機名稱或 IP 位址。這應該設定為虛擬機器的 dataLIF 值。 
+
+
+| `openshift_logging_storage_nfs_directory` | NFS 匯出的掛載路徑。例如，如果磁碟區已連接為 `/openshift_logging`，則此變數應使用該路徑。 
+
+
+| `openshift_logging_storage_volume_name` | 要建立的 PV 的名稱，例如 `pv_ose_logs`。 
+
+
+| `openshift_logging_storage_volume_size` | NFS 匯出的大小，例如 `100Gi`。 
+|===
+如果您的 OpenShift 叢集已在運行，並且 Trident 已部署和配置，則安裝程式可以使用動態配置來建立磁碟區。需要配置以下變數。
+
+[cols="40,40"]
+|===
+| 變數 | 詳細資料 
+
+
+| `openshift_logging_es_pvc_dynamic` | 設定為 true 以使用動態配置磁碟區。 
+
+
+| `openshift_logging_es_pvc_storage_class_name` | PVC 中將使用的儲存類別名稱。 
+
+
+| `openshift_logging_es_pvc_size` | PVC 中請求的磁碟區大小。 
+
+
+| `openshift_logging_es_pvc_prefix` | 日誌記錄服務使用的 PVC 前置碼。 
+
+
+| `openshift_logging_es_ops_pvc_dynamic` | 設定為 `true` 以使用動態配置的磁碟區來執行運維日誌實例。 
+
+
+| `openshift_logging_es_ops_pvc_storage_class_name` | 運維日誌執行個體的儲存類別名稱。 
+
+
+| `openshift_logging_es_ops_pvc_size` | ops 實例的磁碟區請求大小。 
+
+
+| `openshift_logging_es_ops_pvc_prefix` | ops 執行個體 PVC 的前置詞。 
+|===
+
+
+==== 部署日誌堆疊
+
+如果您在初始 OpenShift 安裝過程中部署日誌記錄，則只需遵循標準部署流程即可。Ansible 將配置並部署所需的服務和 OpenShift 對象，以便在 Ansible 完成後服務即可使用。
+
+但是，如果您在初始安裝後進行部署，則需要使用 Ansible 元件 playbook。此過程可能會因 OpenShift 版本而略有不同，因此請務必閱讀並遵循link:https://docs.openshift.com/en/documentation/openshift_container_platform/3.11/["Red Hat OpenShift Container Platform 3.11 文件"^]適用於您版本的相關說明。
+
+
+
+[[metrics-service]]
+== 指標服務
+
+指標服務為管理員提供有關 OpenShift 叢集狀態、資源利用率和可用性的重要資訊。它對於 Pod 自動擴縮容功能也至關重要，許多組織也利用指標服務中的資料來實施成本分攤和/或成本展示應用。
+
+與日誌服務和整個 OpenShift 類似，指標服務也使用 Ansible 進行部署。此外，與日誌服務類似，指標服務既可以在叢集初始設定期間部署，也可以在叢集運行後使用元件安裝方法進行部署。下表包含配置指標服務持久性儲存時的重要變數。
+
+
+NOTE: 下表僅包含與指標服務相關的儲存配置變數。文件中還提供了許多其他選項，您應該根據部署情況進行查閱、配置和使用。
+
+[cols="40,40"]
+|===
+| 變數 | 詳細資料 
+
+
+| `openshift_metrics_storage_kind` | 設定為  `nfs` 讓安裝程式為日誌服務建立 NFS PV。 
+
+
+| `openshift_metrics_storage_host` | NFS 主機的主機名稱或 IP 位址。這應該設定為 SVM 的 dataLIF。 
+
+
+| `openshift_metrics_storage_nfs_directory` | NFS 匯出的掛載路徑。例如，如果磁碟區已連接為 `/openshift_metrics`，則此變數應使用該路徑。 
+
+
+| `openshift_metrics_storage_volume_name` | 要建立的 PV 的名稱，例如 `pv_ose_metrics`。 
+
+
+| `openshift_metrics_storage_volume_size` | NFS 匯出的大小，例如 `100Gi`。 
+|===
+如果您的 OpenShift 叢集已在運行，並且 Trident 已部署和配置，則安裝程式可以使用動態配置來建立磁碟區。需要配置以下變數。
+
+[cols="40,40"]
+|===
+| 變數 | 詳細資料 
+
+
+| `openshift_metrics_cassandra_pvc_prefix` | 用於指標 PVC 的前綴。 
+
+
+| `openshift_metrics_cassandra_pvc_size` | 要求的磁碟區大小。 
+
+
+| `openshift_metrics_cassandra_storage_type` | 用於指標的儲存類型，必須設定為 dynamic，以便 Ansible 建立具有適當儲存類別的 PVC。 
+
+
+| `openshift_metrics_cassanda_pvc_storage_class_name` | 要使用的儲存類別名稱。 
+|===
+
+
+[[deploy-the-metrics-service]]
+=== 部署指標服務
+
+在 hosts/inventory 檔案中定義好對應的 Ansible 變數後，即可使用 Ansible 部署服務。如果在 OpenShift 安裝時部署，PV 將自動建立並使用。如果使用元件 playbook 進行部署，在 OpenShift 安裝完成後，Ansible 會建立所需的 PVC，並在 Trident 為其配置儲存後部署服務。
+
+上述變數和部署流程可能會隨 OpenShift 的每個版本而變化。請務必查看並遵循link:https://docs.redhat.com/en/documentation/openshift_container_platform/3.11/html/configuring_clusters/install-config-cluster-metrics["Red Hat OpenShift 部署指南"^]您所用版本的相關說明，以便根據您的環境進行配置。

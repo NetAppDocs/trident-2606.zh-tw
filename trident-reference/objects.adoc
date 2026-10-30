@@ -1,0 +1,559 @@
+---
+sidebar: sidebar 
+permalink: trident-reference/objects.html 
+keywords: kubernetes objects, trident objects, persistent volume claim, storage class, backend, snapshot, priority class, system-node-critical, daemonset, resource quota, resourcequota, system node critical 
+summary: 有多個資源物件定義了 Kubernetes 與 Trident、Trident 與儲存以及 Kubernetes 與儲存之間的關係。其中一些物件由 Kubernetes 管理，而另一些則由 Trident 管理。 
+---
+= Kubernetes 和 Trident 物件
+:hardbreaks:
+:allow-uri-read: 
+:icons: font
+:imagesdir: ../media/
+
+
+[role="lead"]
+您可以使用 REST API 透過讀取和寫入資源物件與 Kubernetes 和 Trident 進行互動。有多個資源物件定義了 Kubernetes 與 Trident、Trident 與儲存以及 Kubernetes 與儲存之間的關係。其中一些物件由 Kubernetes 管理，而另一些則由 Trident 管理。
+
+
+
+[[how-do-the-objects-interact-with-one-another]]
+== 這些物件之間是如何相互作用的？
+
+要了解這些物件、它們的用途以及它們如何互動，最簡單的方法或許是追蹤 Kubernetes 使用者發出的單一儲存請求：
+
+. 使用者建立一個 `PersistentVolumeClaim`，請求從管理員先前已設定的 Kubernetes `StorageClass`中獲取特定大小的新 `PersistentVolume`。
+. Kubernetes `StorageClass` 將 Trident 識別為其配置器，並包含參數，告訴 Trident 如何為請求的類別配置磁碟區。
+. Trident 會尋找自身 `StorageClass`同名的、用於識別符合項目的 `Backends`和 `StoragePools`，並可利用該實例為該類別配置磁碟區。
+. Trident 在匹配的後端上配置儲存，並建立兩個物件：一個 `PersistentVolume`在 Kubernetes 中，它告訴 Kubernetes 如何尋找、掛載和處理磁碟區，以及 Trident 中的一個磁碟區，它保留了 `PersistentVolume`與實際儲存之間的關係。
+. Kubernetes 將 `PersistentVolumeClaim`綁定到新的 `PersistentVolume`。包含 `PersistentVolumeClaim`的 Pod 會在其運行的任何主機上掛載該 PersistentVolume。
+. 使用者建立一個 `VolumeSnapshot`現有 PVC 的 `VolumeSnapshotClass`，該指向 Trident。
+. Trident 會辨識與 PVC 關聯的磁碟區，並在其後端建立該磁碟區的快照。它還會建立一個 `VolumeSnapshotContent`，指示 Kubernetes 如何識別該快照。
+. 使用者可以建立 `PersistentVolumeClaim`，並以 `VolumeSnapshot`作為來源。
+. Trident 識別所需的快照，並執行與建立 `PersistentVolume`和 `Volume`相同的步驟集。
+
+
+
+TIP: 如需進一步了解有關 Kubernetes 物件的資訊，我們強烈建議您閱讀 Kubernetes 文件的 https://kubernetes.io/docs/concepts/storage/persistent-volumes/["持續磁碟區"^]章節。
+
+
+
+[[kubernetes-persistentvolumeclaim-objects]]
+== Kubernetes `PersistentVolumeClaim` 物件
+
+Kubernetes `PersistentVolumeClaim` 物件是 Kubernetes 叢集使用者發出的儲存請求。
+
+除了標準規格之外、 Trident 還允許使用者指定以下磁碟區專屬註釋、以便在需要時覆寫您在後端組態中設定的預設值：
+
+[cols=",,"]
+|===
+| 註解 | Volume 選項 | 支援的驅動程式 
+
+
+| trident.netapp.io/fileSystem | fileSystem | ontap-san，solidfire-san，ontap-san-economy 
+
+
+| trident.netapp.io/cloneFromPVC | cloneSourceVolume | ontap-nas、ontap-san、solidfire-san、azure-netapp-files、ontap-san-economy 
+
+
+| trident.netapp.io/splitOnClone | splitOnClone | ontap-nas、ontap-san 
+
+
+| trident.netapp.io/protocol | 通訊協定 | 任何 
+
+
+| trident.netapp.io/exportPolicy | exportPolicy | ontap-nas、ontap-nas-economy、ontap-nas-flexgroup 
+
+
+| trident.netapp.io/snapshotPolicy | snapshotPolicy | ontap-nas 、 ontap-nas-economy 、 ontap-nas-flexgroup 、 ontap-san 
+
+
+| trident.netapp.io/snapshotReserve | snapshotReserve | ontap-nas、ontap-nas-flexgroup、ontap-san 
+
+
+| trident.netapp.io/snapshotDirectory | snapshotDirectory | ontap-nas、ontap-nas-economy、ontap-nas-flexgroup 
+
+
+| trident.netapp.io/unixPermissions | unixPermissions | ontap-nas、ontap-nas-economy、ontap-nas-flexgroup 
+
+
+| trident.netapp.io/blockSize | blockSize | solidfire-san 
+
+
+| trident.netapp.io/skipRecoveryQueue | skipRecoveryQueue | ontap-nas 、 ontap-nas-economy 、 ontap-nas-flexgroup 、 ontap-san 、 ontap-san-economy 
+|===
+如果建立的 PV 啟用了 `Delete`回收策略，Trident 會在 PV 釋放時（即使用者刪除 PVC 時）同時刪除 PV 及其後端磁碟區。如果刪除操作失敗，Trident 會將該 PV 標記為失敗，並定期重試該操作，直到成功或 PV 手動刪除。如果 PV 使用了 `+Retain+`回收策略，Trident 會忽略該策略，並假定管理員會將其從 Kubernetes 和後端清除，從而允許在刪除磁碟區之前對其進行備份或檢查。請注意，刪除 PV 不會導致 Trident 刪除後端磁碟區。您應該使用 REST API 來刪除後端磁碟區（(`tridentctl`）。
+
+Trident 支援使用 CSI 規格建立 Volume Snapshot ：您可以建立 Volume Snapshot 並將其做為資料來源來複製現有的 PVC 。如此一來、 PV 的時間點複本就能以快照的形式公開給 Kubernetes 。然後可以使用快照來建立新的 PV 。請參閱 `+On-Demand Volume Snapshots+`以瞭解其運作方式。
+
+Trident 也提供了 `cloneFromPVC`和 `splitOnClone`註解來建立複本。您可以使用這些註解來複製 PVC，而無需使用 CSI 實作。
+
+例如：如果使用者已有一個名為 `mysql`的 PVC，則可以使用註解（例如 `mysqlclone`）建立名為 `trident.netapp.io/cloneFromPVC: mysql`的新 PVC。設定此註解後，Trident 會複製與 mysql PVC 對應的磁碟區，而非從頭配置磁碟區。
+
+請考慮以下幾點：
+
+* NetApp 建議複製閒置的磁碟區。
+* PVC 及其複本應位於相同的 Kubernetes 命名空間中，並具有相同的儲存類別。
+* 使用 `ontap-nas`和 `ontap-san`驅動程式時，可能需要將 PVC 註解 `trident.netapp.io/splitOnClone`與 `trident.netapp.io/cloneFromPVC`結合使用。將 `trident.netapp.io/splitOnClone`設為 `true`後，Trident 會將複製的磁碟區與父磁碟區分離，從而完全解耦複製磁碟區與其父磁碟區的生命週期，但代價是損失一些儲存效率。不設定 `trident.netapp.io/splitOnClone`或將其設為 `false`會導致後端空間佔用減少，但代價是在父磁碟區和複製磁碟區之間建立依賴關係，使得必須先刪除複製磁碟區才能刪除父磁碟區。在複製空資料庫磁碟區的情況下，分離複製磁碟區是合理的，因為預計該磁碟區及其複製磁碟區會有很大差異，並且無法從 ONTAP 提供的儲存效率中受益。
+
+
+ `sample-input` 目錄包含可與 Trident 搭配使用的 PVC 定義範例。如需與 Trident 磁碟區相關的參數和設定的完整說明，請參閱 。
+
+
+
+[[kubernetes-persistentvolume-objects]]
+== Kubernetes `PersistentVolume` 物件
+
+Kubernetes `PersistentVolume` 物件代表一塊可供 Kubernetes 叢集使用的儲存資源。它的生命週期獨立於使用它的 Pod。
+
+
+NOTE: Trident 會根據其配置的磁碟區自動建立 `PersistentVolume`物件並將其註冊到 Kubernetes 叢集中。您無需自行管理這些物件。
+
+建立引用基於 Trident 的 `StorageClass`儲存單元（PVC）時，Trident 會使用對應的儲存類別來設定新磁碟區，並為該磁碟區註冊一個新的實體磁碟區（PV）。在配置已設定的磁碟區和對應的 PV 時，Trident 遵循以下規則：
+
+* Trident 會為 Kubernetes 產生一個 PV 名稱，並產生一個用於配置儲存設備的內部名稱。在這兩種情況下，它都會確保名稱在其範圍內是唯一的。
+* 磁碟區大小與 PVC 中要求的大小盡可能接近，但可能會向上取整到最接近的可分配數量，具體取決於平台。
+
+
+
+
+[[kubernetes-storageclass-objects]]
+== Kubernetes `StorageClass` 物件
+
+Kubernetes `StorageClass` 物件透過名稱在 `PersistentVolumeClaims`中指定，以便使用一組屬性來配置儲存設備。儲存類別本身會識別要使用的資源配置程式，並以資源配置程式能夠理解的方式定義該組屬性。
+
+它是管理員需要建立和管理的兩個基本物件之一。另一個是 Trident 後端物件。
+
+使用 Trident 的 Kubernetes `StorageClass` 物件如下所示：
+
+[source, yaml]
+----
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: <Name>
+provisioner: csi.trident.netapp.io
+mountOptions: <Mount Options>
+parameters: <Trident Parameters>
+allowVolumeExpansion: true
+volumeBindingMode: Immediate
+----
+這些參數是 Trident 特有的，它們告訴 Trident 如何為該類別配置磁碟區。
+
+儲存類別參數如下：
+
+[cols=",,,"]
+|===
+| 屬性 | 類型 | 必填 | 說明 
+
+
+| 屬性 | map[string]string | 否 | 請參閱以下屬性部分 
+
+
+| storagePools | map[string]StringList | 否 | 後端名稱到其中儲存池清單的映射 
+
+
+| additionalStoragePools | map[string]StringList | 否 | 後端名稱到其中儲存池清單的映射 
+
+
+| excludeStoragePools | map[string]StringList | 否 | 後端名稱到其中儲存池清單的映射 
+|===
+儲存屬性及其可能的值可以分為儲存資源池選擇屬性和 Kubernetes 屬性。
+
+
+
+[[storage-pool-selection-attributes]]
+=== 儲存資源池選擇屬性
+
+這些參數決定了應使用哪些 Trident 管理的儲存資源池來配置給定類型的磁碟區。
+
+[cols=",,,,,"]
+|===
+| 屬性 | 類型 | 價值觀 | 優惠 | 要求 | 支援者 
+
+
+| 媒體^1^ | 字串 | HDD、混合式、SSD | Pool 包含此類型的媒體；混合型表示兩者兼具 | 指定的媒體類型 | ontap-nas 、 ontap-nas-economy 、 ontap-nas-flexgroup 、 ontap-san 、 solidfire-san 
+
+
+| provisioningType | 字串 | 薄、厚 | 資源池支援此佈建方法 | 已指定佈建方法 | thick ：所有 ONTAP ；thin ：所有 ONTAP 和 SolidFire-SAN 
+
+
+| backendType | 字串  a| 
+ontap-nas、ontap-nas-economy、ontap-nas-flexgroup、ontap-san、solidfire-san、azure-netapp-files、ontap-san-economy
+| Pool 屬於這種類型的後端 | 指定後端 | 所有驅動程式 
+
+
+| 快照 | 布林值 | true、false | Pool 支援帶快照的磁碟區 | 已啟用快照的磁碟區 | ontap-nas、ontap-san、solidfire-san 
+
+
+| 複製 | 布林值 | true、false | 儲存池支援複製磁碟區 | 已啟用複本的磁碟區 | ontap-nas、ontap-san、solidfire-san 
+
+
+| 加密 | 布林值 | true、false | 儲存池支援加密磁碟區 | 已啟用加密的磁碟區 | ontap-nas、ontap-nas-economy、ontap-nas-flexgroups、ontap-san 
+
+
+| IOPS | int | 正整數 | Pool 能夠保證此範圍內的 IOPS | Volume 保證了這些 IOPS | solidfire-san 
+|===
+^1^：ONTAP Select 系統不支援
+
+在大多數情況下，請求的值會直接影響資源配置；例如，請求厚資源配置會導致磁碟區採用厚資源配置方式。但是，Element 儲存資源池使用其提供的最小和最大 IOPS 來設定 QoS 值，而不是使用請求的值。在這種情況下，請求的值僅用於選擇儲存資源池。
+
+理想情況下，您可以單獨使用 `attributes`來模擬滿足特定類別需求的儲存特性。Trident 會自動發現並選擇與您指定的 `attributes`所有特性都相符的儲存池。
+
+如果您發現無法使用  `attributes` 自動選擇類別的正確池，則可以使用  `storagePools` 和  `additionalStoragePools` 參數進一步細化池，甚至選擇一組特定的池。
+
+您可以使用 `storagePools`參數進一步限制與任何指定 `attributes`相符的資源池集合。換句話說、Trident 使用由 `attributes`和 `storagePools`參數所識別的資源池交集進行資源配置。您可以單獨使用其中一個參數、也可以同時使用兩個參數。
+
+您可以使用 `additionalStoragePools`參數擴展 Trident 用於配置的池集，而無需考慮透過 `attributes`和 `storagePools`參數選擇的任何池。
+
+您可以使用  `excludeStoragePools` 參數篩選 Trident 用於資源配置的池集合。使用此參數會移除所有符合的池。
+
+在 `storagePools`和 `additionalStoragePools`參數中，每個條目都採用 `<backend>:<storagePoolList>`的形式，其中 `<storagePoolList>`是指定後端的儲存池清單（以逗號分隔）。例如， `additionalStoragePools`的值可能類似於 `ontapnas_192.168.1.100:aggr1,aggr2;solidfire_192.168.1.101:bronze`。這些清單接受後端和清單值的正規表示式值。您可以使用 `tridentctl get backend`取得後端及其儲存池的清單。
+
+
+
+[[kubernetes-attributes]]
+=== Kubernetes 屬性
+
+這些屬性不會影響 Trident 在動態資源配置期間選取儲存資源池 / 後端。相反地，這些屬性只是提供 Kubernetes Persistent Volume 支援的參數。工作節點負責檔案系統建立作業，可能需要檔案系統公用程式，例如 xfsprogs。
+
+[cols=",,,,,"]
+|===
+| 屬性 | 類型 | 價值觀 | 說明 | 相關驅動程式 | Kubernetes 版本 
+
+
+| fsType | 字串 | ext4、ext3、xfs | 區塊磁碟區的檔案系統類型 | solidfire-san、ontap-nas、ontap-nas-economy、ontap-nas-flexgroup、ontap-san、ontap-san-economy | 全部 
+
+
+| allowVolumeExpansion | 布林值 | true、false | 啟用或停用對增大 PVC 大小的支援 | ontap-nas、ontap-nas-economy、ontap-nas-flexgroup、ontap-san、ontap-san-economy、solidfire-san、azure-netapp-files | 1.11+ 
+
+
+| volumeBindingMode | 字串 | 即時、WaitForFirstConsumer | 選擇何時進行磁碟區綁定和動態資源配置 | 全部 | 1.19 - 1.26 
+|===
+[TIP]
+====
+*  `fsType` 參數用於控制 SAN LUNs 所需的檔案系統類型。此外，Kubernetes 也會在儲存類別中使用  `fsType` 來表示檔案系統已存在。只有在設定  `fsType` 時，才能使用 pod 的  `fsGroup` 安全性內容來控制磁碟區擁有權。請參閱 link:https://kubernetes.io/docs/tasks/configure-pod-container/security-context/["Kubernetes：為 Pod 或 Container 設定 Security Context"^] 以取得使用  `fsGroup` 內容設定磁碟區擁有權的概述。Kubernetes 僅會在下列情況套用  `fsGroup` 值：
++
+** `fsType` 設定在儲存類別中。
+** PVC 存取模式為 RWO。
+
+
++
+對於 NFS 儲存驅動程式，檔案系統已作為 NFS 匯出的一部分存在。若要使用 `fsGroup`，儲存類別仍需指定 `fsType`。您可以將其設定為 `nfs`或任何非空值。
+
+* 如需磁碟區擴充的詳細資訊，請參閱 link:https://docs.netapp.com/us-en/trident/trident-use/vol-expansion.html["擴充磁碟區"]。
+* Trident 安裝程式套件提供了幾個範例儲存類別定義，可與 Trident 搭配使用於``sample-input/storage-class-*.yaml``。刪除 Kubernetes 儲存類別也會導致對應的 Trident 儲存類別被刪除。
+
+
+====
+
+
+[[kubernetes-volumesnapshotclass-objects]]
+== Kubernetes `VolumeSnapshotClass` 物件
+
+Kubernetes `VolumeSnapshotClass` 物件類似於 `StorageClasses`。它們用於定義多種儲存類別，並由磁碟區快照引用，以便將快照與所需的快照類別關聯起來。每個磁碟區快照都與一個磁碟區快照類別相關聯。
+
+若要建立快照，必須由管理員定義 `VolumeSnapshotClass`。Volume Snapshot Class 按以下定義建立：
+
+[source, yaml]
+----
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotClass
+metadata:
+  name: csi-snapclass
+driver: csi.trident.netapp.io
+deletionPolicy: Delete
+----
+ `driver`向 Kubernetes 指定 `csi-snapclass`類別的磁碟區快照請求由 Trident 處理。 `deletionPolicy`指定必須刪除快照時要執行的動作。當 `deletionPolicy`設定為 `Delete`時，刪除快照時會同時移除磁碟區快照物件以及儲存叢集上的底層快照。或者，將其設定為 `Retain`表示 `VolumeSnapshotContent`和實體快照將被保留。
+
+
+
+[[kubernetes-volumesnapshot-objects]]
+== Kubernetes `VolumeSnapshot` 物件
+
+Kubernetes `VolumeSnapshot` 物件是建立磁碟區快照的請求。正如 PVC 代表使用者對磁碟區的請求一樣，磁碟區快照是使用者對現有 PVC 建立快照的請求。
+
+當收到磁碟區快照請求時，Trident 會自動在後端建立磁碟區快照，並透過建立一個唯一
+`VolumeSnapshotContent`物件來公開該快照。您可以從現有 PVC 建立快照，並在建立新 PVC 時使用這些快照作為 DataSource。
+
+
+NOTE: VolumeSnapshot 的生命週期與來源 PVC 無關：即使來源 PVC 被刪除，快照仍然存在。刪除具有相關快照的 PVC 時， Trident 會將此 PVC 的備份磁碟區標記為 *Deleting* 狀態，但不會完全移除。當所有關聯的快照都被刪除後，該磁碟區才會被移除。
+
+
+
+[[kubernetes-volumesnapshotcontent-objects]]
+== Kubernetes `VolumeSnapshotContent` 物件
+
+Kubernetes `VolumeSnapshotContent` 物件表示從已配置的磁碟區中取得的快照。它類似於 `PersistentVolume`，表示儲存叢集上已配置的快照。與 `PersistentVolumeClaim`和 `PersistentVolume`物件類似，建立快照時， `VolumeSnapshotContent`物件會維護與 `VolumeSnapshot`物件一一對應的關係，該物件要求建立快照。
+
+該 `VolumeSnapshotContent`物件包含唯一標識快照的詳細資訊，例如 `snapshotHandle`。這 `snapshotHandle`是 PV 名稱和 `VolumeSnapshotContent`物件名稱的唯一組合。
+
+當收到快照請求時， Trident 會在後端建立快照。快照建立完成後， Trident 會配置一個 `VolumeSnapshotContent`物件，從而將快照公開給 Kubernetes API。
+
+
+NOTE: 通常情況下，您無需管理該  `VolumeSnapshotContent` 物件。但如果您想 link:../trident-use/vol-snapshots.html#import-a-volume-snapshot["匯入 Volume Snapshot"] 在 Trident 之外建立。
+
+
+
+[[kubernetes-volumegroupsnapshotclass-objects]]
+== Kubernetes `VolumeGroupSnapshotClass` 物件
+
+Kubernetes `VolumeGroupSnapshotClass` 物件類似於 `VolumeSnapshotClass`。它們有助於定義多個儲存類別，並由磁碟區群組快照參照，以便將快照與所需的快照類別建立關聯。每個磁碟區群組快照都與單一磁碟區群組快照類別建立關聯。
+
+管理員應定義  `VolumeGroupSnapshotClass`，以便建立快照群組。磁碟區群組快照類別的建立定義如下：
+
+[source, yaml]
+----
+apiVersion: groupsnapshot.storage.k8s.io/v1beta1
+kind: VolumeGroupSnapshotClass
+metadata:
+  name: csi-group-snap-class
+  annotations:
+    kubernetes.io/description: "Trident group snapshot class"
+driver: csi.trident.netapp.io
+deletionPolicy: Delete
+----
+ `driver`指定 Kubernetes 將 `csi-group-snap-class`類別的磁碟區群組快照要求交由 Trident 處理。 `deletionPolicy`指定必須刪除群組快照時要執行的動作。當 `deletionPolicy`設定為 `Delete`時，刪除快照時會同時移除磁碟區群組快照物件以及儲存叢集上的底層快照。或者，將其設定為 `Retain`表示 `VolumeGroupSnapshotContent`和實體快照將被保留。
+
+
+
+[[kubernetes-volumegroupsnapshot-objects]]
+== Kubernetes `VolumeGroupSnapshot` 物件
+
+Kubernetes `VolumeGroupSnapshot` 物件是建立多個磁碟區快照的請求。正如 PVC 代表使用者對磁碟區提出的請求一樣，磁碟區群組快照是使用者對建立現有 PVC 快照提出的請求。
+
+當收到磁碟區組快照請求時， Trident 會自動在後端建立磁碟區的群組快照，並透過建立唯一的 `VolumeGroupSnapshotContent`物件來公開該快照。您可以從現有 PVC 建立快照，並在建立新 PVC 時使用這些快照作為 DataSource。
+
+
+NOTE: VolumeGroupSnapshot 的生命週期與來源 PVC 無關：即使刪除來源 PVC ，快照仍會保留。刪除具有相關快照的 PVC 時， Trident 會將此 PVC 的備份磁碟區標記為 *Deleting* 狀態，但不會完全移除。刪除所有相關快照時，就會移除磁碟區群組快照。
+
+
+
+[[kubernetes-volumegroupsnapshotcontent-objects]]
+== Kubernetes `VolumeGroupSnapshotContent` 物件
+
+Kubernetes `VolumeGroupSnapshotContent` 物件表示從已配置的磁碟區中取得的群組快照。它類似於 `PersistentVolume`，表示儲存叢集上已配置的快照。與 `PersistentVolumeClaim`和 `PersistentVolume`物件類似，建立快照時， `VolumeSnapshotContent`物件會維護與 `VolumeSnapshot`物件一一對應的關係，該物件要求建立快照。
+
+該 `VolumeGroupSnapshotContent`物件包含用於識別快照群組的詳細資訊，例如 `volumeGroupSnapshotHandle`以及儲存系統上現有的個別 volumeSnapshotHandles。
+
+當收到快照請求時、 Trident 會在後端建立磁碟區群組快照。磁碟區群組快照建立完成後、 Trident 會設定 `VolumeGroupSnapshotContent`物件、從而將快照公開給 Kubernetes API 。
+
+
+
+[[kubernetes-customresourcedefinition-objects]]
+== Kubernetes `CustomResourceDefinition` 物件
+
+Kubernetes 自訂資源是 Kubernetes API 中的端點，由管理員定義，用於將相似物件分組。Kubernetes 支援建立自訂資源來儲存物件集合。您可以透過執行 `kubectl get crds`來取得這些資源定義。
+
+Kubernetes 將自訂資源定義（CRD）及其關聯的物件中繼資料儲存在其中繼資料存放區中。這樣就不需要為 Trident 設置單獨的存放區。
+
+Trident 使用 `CustomResourceDefinition`物件來維護 Trident 物件的身份，例如 Trident 後端、Trident 儲存類別和 Trident 磁碟區。這些物件由 Trident 管理。此外，CSI Volume Snapshot 架構引入了一些定義 Volume Snapshot 所需的 CRD。
+
+CRD 是 Kubernetes 的一種建構。上述資源的物件由 Trident 建立。例如，當使用 `tridentctl`建立後端時，會建立一個對應的 `tridentbackends` CRD 物件供 Kubernetes 使用。
+
+關於 Trident 的 CRD，需要記住以下幾點：
+
+* 安裝 Trident 時，會建立一組 CRD，可以像使用任何其他資源類型一樣使用這些 CRD。
+* 使用 `tridentctl uninstall`命令卸載 Trident 時、Trident Pod 會被刪除、但建立的 CRD 不會被清除。請參閱link:../trident-managing-k8s/uninstall-trident.html["解除安裝 Trident"]以瞭解如何完全移除 Trident 並從頭開始重新設定。
+
+
+
+
+[[trident-storageclass-objects]]
+== Trident `StorageClass` 物件
+
+Trident 會為 Kubernetes `StorageClass` 物件建立相符的儲存類別，這些物件在其 provisioner 欄位中指定 `csi.trident.netapp.io`。儲存類別名稱與其所代表的 Kubernetes `StorageClass` 物件名稱相符。
+
+
+NOTE: 使用 Kubernetes 時，當使用 Trident 作為佈建程式的 Kubernetes `StorageClass`註冊時，這些物件會自動建立。
+
+儲存類別包含一系列磁碟區需求。Trident 會將這些需求與每個儲存池中存在的屬性進行匹配；如果匹配，則該儲存池是使用該儲存類別配置磁碟區的有效目標。
+
+您可以使用 REST API 直接建立儲存類別配置來定義儲存類別。但是，對於 Kubernetes 部署，我們希望在註冊新的 Kubernetes `StorageClass` 物件時建立儲存類別配置。
+
+
+
+[[trident-backend-objects]]
+== Trident 後端物件
+
+後端代表 Trident 在其上配置磁碟區的儲存提供者；單一 Trident 執行個體可以管理任意數量的後端。
+
+
+NOTE: 這是您可以自行建立和管理的兩種物件類型之一。另一種是 Kubernetes `StorageClass` 物件。
+
+如需如何建構這些物件的詳細資訊，請參閱 link:../trident-use/backends.html["配置後端"]。
+
+
+
+[[trident-storagepool-objects]]
+== Trident `StoragePool` 物件
+
+儲存池代表每個後端可用於資源配置的不同位置。對於 ONTAP，這些儲存池對應於 SVM 中的聚合。對於 NetApp HCI/SolidFire，這些儲存池對應於管理員指定的 QoS 頻段。每個儲存池都有一組不同的儲存屬性，這些屬性定義了其效能特徵和資料保護特徵。
+
+與此處的其他物件不同、儲存資源池候選對象始終會自動探索和管理。
+
+
+
+[[trident-volume-objects]]
+== Trident `Volume` 物件
+
+磁碟區是基本的資源配置單元，包含後端端點（例如 NFS 共用）、iSCSI 和 FC LUN。在 Kubernetes 中，這些端點直接對應至 `PersistentVolumes`。建立磁碟區時，請確保其具有儲存類別（用於確定磁碟區的配置位置）和大小。
+
+[NOTE]
+====
+* 在 Kubernetes 中，這些物件由系統自動管理。您可以查看這些物件，以了解 Trident 已配置了哪些資源。
+* 刪除包含關聯快照的 PV 時，對應的 Trident 磁碟區會更新為 *Deleting* 狀態。若要刪除 Trident 磁碟區，您需要先刪除該磁碟區的快照。
+
+
+====
+Volume 組態定義了已配置 Volume 應具有的內容。
+
+[cols=",,,"]
+|===
+| 屬性 | 類型 | 必填 | 說明 
+
+
+| 版本 | 字串 | 否 | Trident API 版本（「1」） 
+
+
+| 姓名 | 字串 | 是的 | 要建立的磁碟區名稱 
+
+
+| storageClass | 字串 | 是的 | 配置磁碟區時要使用的儲存類別 
+
+
+| 尺寸 | 字串 | 是的 | 要配置的磁碟區大小（以位元組為單位） 
+
+
+| 通訊協定 | 字串 | 否 | 使用的協定類型；「file」或「block」 
+
+
+| internalName | 字串 | 否 | 儲存系統中物件的名稱；由 Trident 產生 
+
+
+| cloneSourceVolume | 字串 | 否 | ontap（nas，san）＆solidfire-*：要複製的 Volume 名稱 
+
+
+| splitOnClone | 字串 | 否 | ONTAP（NAS、SAN）：將複本從其父項分割 
+
+
+| snapshotPolicy | 字串 | 否 | ontap-*：要使用的 Snapshot 原則 
+
+
+| snapshotReserve | 字串 | 否 | ontap-*：為 Snapshot 預留的 Volume 百分比 
+
+
+| exportPolicy | 字串 | 否 | ontap-nas*：要使用的匯出原則 
+
+
+| snapshotDirectory | 布林值 | 否 | ontap-nas*：Snapshot 目錄是否可見 
+
+
+| unixPermissions | 字串 | 否 | ontap-nas*：初始 UNIX 權限 
+
+
+| blockSize | 字串 | 否 | SolidFire-*：區塊/磁區大小 
+
+
+| fileSystem | 字串 | 否 | 檔案系統類型 
+
+
+| skipRecoveryQueue | 字串 | 否 | 刪除磁碟區時、繞過儲存設備中的還原佇列、並立即刪除磁碟區。 
+|===
+Trident 在建立磁碟區時會產生 `internalName`。此過程分為兩個步驟。首先，它會在磁碟區名稱前面加上儲存前綴（可以是預設 `trident`或後端配置中的前綴），產生 `<prefix>-<volume-name>`格式的名稱。然後，它會對名稱進行清理，取代後端不允許的字元。對於 ONTAP 後端，它會將連字號替換為底線（因此，內部名稱變成 `<prefix>_<volume-name>`）。對於 Element 後端，它會將底線替換為連字號。
+
+您可以使用磁碟區配置透過 REST API 直接設定磁碟區，但在 Kubernetes 部署中，我們預期大多數使用者會使用標準的 Kubernetes `PersistentVolumeClaim` 方法。Trident 會在設定過程中自動建立此磁碟區物件。
+
+
+
+[[trident-snapshot-objects]]
+== Trident `Snapshot` 物件
+
+快照是磁碟區在特定時間點的副本，可用於設定新磁碟區或復原狀態。在 Kubernetes 中，快照直接對應於  `VolumeSnapshotContent` 物件。每個快照都與一個磁碟區關聯，該磁碟區是快照資料的來源。
+
+每個  `Snapshot` 物件都包含以下屬性：
+
+[cols=",,,"]
+|===
+| 屬性 | 類型 | 必填 | 說明 
+
+
+| 版本 | 字串  a| 
+是的
+| Trident API 版本（「1」） 
+
+
+| 姓名 | 字串  a| 
+是的
+| Trident 快照物件的名稱 
+
+
+| internalName | 字串  a| 
+是的
+| 儲存系統上 Trident 快照物件的名稱 
+
+
+| volumeName | 字串  a| 
+是的
+| 建立快照的持久磁碟區名稱 
+
+
+| volumeInternalName | 字串  a| 
+是的
+| 儲存系統上關聯的 Trident 磁碟區物件名稱 
+|===
+
+NOTE: 在 Kubernetes 中，這些物件由系統自動管理。您可以查看這些物件，以了解 Trident 已配置了哪些資源。
+
+當建立 Kubernetes `VolumeSnapshot` 物件請求時、 Trident 會在後端儲存系統上建立快照物件。此快照物件的 `internalName`是由前置碼 `snapshot-`與 `UID`物件的 `VolumeSnapshot`組合而成（例如、 `snapshot-e8d8a0ca-9826-11e9-9807-525400f3f660`）。 `volumeName`和 `volumeInternalName`則透過取得後端磁碟區的詳細資料來填入。
+
+
+
+[[trident-resourcequota-object]]
+== Trident `ResourceQuota` 物件
+
+Trident 守護程序集使用  `system-node-critical` Priority Class（Kubernetes 中可用的最高 Priority Class），以確保 Trident 能夠在節點優雅關閉期間識別和清理磁碟區，並允許 Trident 守護程序集 Pod 在資源壓力高的叢集中搶佔優先順序較低的工作負載。
+
+為了實現這一點，Trident 使用一個 `ResourceQuota`物件來確保 Trident 常駐程式集符合「系統節點關鍵」優先權類別。在部署和建立常駐程式集之前，Trident 會尋找該 `ResourceQuota`物件，如果找不到，則套用該物件。
+
+如果您需要對預設 Resource Quota 和 Priority Class 進行更多控制，可以產生 `custom.yaml`或使用 Helm chart 配置 `ResourceQuota`物件。
+
+以下是一個 `ResourceQuota` 物件優先考慮 Trident daemonset 的範例。
+
+[source, yaml]
+----
+apiVersion: <version>
+kind: ResourceQuota
+metadata:
+  name: trident-csi
+  labels:
+    app: node.csi.trident.netapp.io
+spec:
+  scopeSelector:
+    matchExpressions:
+      - operator: In
+        scopeName: PriorityClass
+        values:
+          - system-node-critical
+----
+如需資源配額的詳細資訊，請參閱 link:https://kubernetes.io/docs/concepts/policy/resource-quotas/["Kubernetes：Resource Quotas"^]。
+
+
+
+[[clean-up-resourcequota-if-installation-fails]]
+=== 如果安裝失敗，請進行清理 `ResourceQuota`
+
+如果在建立  `ResourceQuota` 物件後安裝失敗（這種情況很少見）、請先嘗試 link:../trident-managing-k8s/uninstall-trident.html["解除安裝"]、然後再重新安裝。
+
+如果這樣不行，請手動移除  `ResourceQuota` 物件。
+
+
+
+[[remove-resourcequota]]
+=== 移除 `ResourceQuota`
+
+如果您希望自行控制資源分配，可以使用下列指令刪除 Trident `ResourceQuota` 物件：
+
+[listing]
+----
+kubectl delete quota trident-csi -n trident
+----

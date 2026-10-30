@@ -1,0 +1,79 @@
+---
+sidebar: sidebar 
+permalink: trident-docker/collect-logs-docker.html 
+keywords: deploy, Trident, trident for docker, docker, logs, binary, managed plugin 
+summary: 您可以收集日誌以協助進行疑難排解。您用來收集日誌的方法會因您執行 Docker 外掛程式的方式而異。 
+---
+= 收集日誌
+:hardbreaks:
+:allow-uri-read: 
+:icons: font
+:imagesdir: ../media/
+
+
+[role="lead"]
+您可以收集日誌以協助進行疑難排解。您用來收集日誌的方法會因您執行 Docker 外掛程式的方式而異。
+
+
+
+[[collect-logs-for-troubleshooting]]
+== 收集記錄以進行疑難排解
+
+.步驟
+. 如果您使用建議的託管外掛程式方法執行 Trident（即使用 `docker plugin`指令），請按如下方式檢視：
++
+[source, console]
+----
+docker plugin ls
+----
++
+[listing]
+----
+ID                  NAME                DESCRIPTION                          ENABLED
+4fb97d2b956b        netapp:latest       nDVP - NetApp Docker Volume Plugin   false
+journalctl -u docker | grep 4fb97d2b956b
+----
++
+標準日誌等級應該足以幫助您診斷大多數問題。如果發現這還不夠，您可以啟用偵錯日誌記錄。
+
+. 若要啟用偵錯日誌記錄、請安裝啟用偵錯日誌記錄的外掛程式：
++
+[source, console]
+----
+docker plugin install netapp/trident-plugin:<version> --alias <alias> debug=true
+----
++
+或者，在外掛程式已安裝的情況下啟用偵錯記錄：
+
++
+[source, console]
+----
+docker plugin disable <plugin>
+----
++
+[source, console]
+----
+docker plugin set <plugin> debug=true
+----
++
+[source, console]
+----
+docker plugin enable <plugin>
+----
+. 如果您在主機上執行該二進位檔案，則日誌位於主機的  `/var/log/netappdvp` 目錄中。若要啟用偵錯日誌記錄，請在執行外掛程式時指定  `-debug`。
+
+
+
+
+[[general-troubleshooting-tips]]
+== 一般疑難排解秘訣
+
+* 新用戶最常遇到的問題是配置錯誤，導致插件無法初始化。發生這種情況時，您在嘗試安裝或啟用插件時可能會看到類似這樣的訊息：
++
+`Error response from daemon: dial unix /run/docker/plugins/<id>/netapp.sock: connect: no such file or directory`
+
++
+這意味著插件啟動失敗。幸運的是，該插件內建了全面的日誌記錄功能，應該可以幫助您診斷可能遇到的絕大多數問題。
+
+* 如果將 PV 掛載到容器時出現問題，請確保已安裝並執行 `rpcbind`。請使用主機作業系統所需的套件管理員，並檢查 `rpcbind`是否正在執行。您可以透過執行 `systemctl status rpcbind`或其等效指令來檢查 rpcbind 服務的狀態。
+

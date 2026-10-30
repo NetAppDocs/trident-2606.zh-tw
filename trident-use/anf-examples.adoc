@@ -1,0 +1,547 @@
+---
+sidebar: sidebar 
+permalink: trident-use/anf-examples.html 
+keywords: trident backend, azure netapp files, smb volumes, smb, windows 
+summary: 了解 Azure NetApp Files 的 NFS 和 SMB 後端設定選項，並查看設定範例。 
+---
+= Azure NetApp Files 後端組態選項和範例
+:hardbreaks:
+:allow-uri-read: 
+:icons: font
+:imagesdir: ../media/
+
+
+[role="lead"]
+了解 Azure NetApp Files 的 NFS 和 SMB 後端設定選項，並查看設定範例。
+
+
+
+[[backend-configuration-options]]
+== 後端組態選項
+
+Trident 使用您的後端設定（子網路、虛擬網路、服務等級和位置）在要求的位置可用的容量池上建立 Azure NetApp Files Volume，並符合要求的服務等級和子網路。
+
+Azure NetApp Files 後端提供以下設定選項。
+
+[cols="3"]
+|===
+| 參數 | 說明 | 預設 
+
+
+| `version` | 後端配置版本。 | 始終為 1 
+
+
+| `storageDriverName` | 儲存驅動程式的名稱 | "azure-netapp-files" 
+
+
+| `backendName` | 儲存後端的自訂名稱 | 驅動程式名稱 + "_" + 隨機字元 
+
+
+| `subscriptionID` | Azure 訂閱的訂閱 ID（在 AKS 叢集上啟用託管識別時為選用）。 |  
+
+
+| `tenantID` | 在 AKS 叢集上使用託管身分或雲端身分時，來自應用程式註冊的租用戶 ID 為選用項目。 |  
+
+
+| `clientID` | 在 AKS 叢集上使用託管身分或雲端身分時，來自 App Registration 的用戶端 ID 為選用項目。 |  
+
+
+| `clientSecret` | 在 AKS 叢集上使用託管身分或雲端身分時，來自應用程式註冊的用戶端密碼為選用項目。 |  
+
+
+| `serviceLevel` | 其中之一  `Standard`、 `Premium` 或  `Ultra` | " （隨機） 
+
+
+| `location` | 將在其中建立新磁碟區的 Azure 位置名稱在 AKS 叢集上啟用託管身分識別時為選用。 |  
+
+
+| `cloudConfiguration.cloudName` | 識別後端的 Azure 雲端環境。使用 Azure Government 時設定為 `AzureGovernment`。 |  
+
+
+| `resourceGroups` | 用於篩選已發現資源的資源群組清單 | "[]" （無濾鏡） 
+
+
+| `netappAccounts` | 用於篩選已發現資源的 NetApp 帳戶列表 | "[]" （無濾鏡） 
+
+
+| `capacityPools` | 用於篩選已發現資源的容量集區清單 | "[]" （無過濾，隨機） 
+
+
+| `virtualNetwork` | 具有委派子網路的虛擬網路名稱 | "" 
+
+
+| `subnet` | 委派給  `Microsoft.Netapp/volumes` 的子網路名稱 | "" 
+
+
+| `networkFeatures` | 磁碟區的 VNet 功能集，可以是 `Basic`或 `Standard`。網路功能並非在所有區域都可用，可能需要在訂閱中啟用。在未啟用功能時指定 `networkFeatures`會導致磁碟區佈建失敗。 | "" 
+
+
+| `nfsMountOptions` | 對 NFS 掛載選項進行精細控制。SMB 卷將忽略此設定。若要使用 NFS 版本 4.1 掛載卷，請在以逗號分隔的掛載選項清單中新增  `nfsvers=4` 以選擇 NFS v4.1。在儲存類別定義中設定的掛載選項會覆蓋後端配置中設定的掛載選項。 | "nfsvers=3" 
+
+
+| `limitVolumeSize` | 如果請求的磁碟區大小大於此值，則配置失敗 | " （預設不強制執行） 
+
+
+| `debugTraceFlags` | 用於疑難排解的偵錯旗標。例如 `\{"api": false, "method": true, "discovery": true}`。除非您正在進行疑難排解並需要詳細的記錄傾印，否則請勿使用此功能。 | null 
+
+
+| `nasType` | 配置 NFS 或 SMB 磁碟區的建立。選項為 `nfs`、 `smb`或 null。設定為 null 則預設建立 NFS 磁碟區。 | `nfs` 
+
+
+| `supportedTopologies` | 表示此後端支援的區域和可用區列表。如需詳細資訊，請參閱 link:../trident-use/csi-topology.html["使用 CSI 拓撲"]。 |  
+
+
+| `qosType` | 表示 QoS 類型：自動或手動。 | 自動 
+
+
+| `maxThroughput` | 設定允許的最大處理量（單位：MiB/ 秒）。僅支援手動 QoS 容量集區。 | `4 MiB/sec` 
+|===
+
+NOTE: 如需網路功能的詳細資訊，請參閱 link:https://docs.microsoft.com/en-us/azure/azure-netapp-files/configure-network-features["設定 Azure NetApp Files 磁碟區的網路功能"^]。
+
+
+
+[[consider-azure-cloud-environments-26-06]]
+== 考慮 Azure 雲端環境（26.06）
+
+從 26.06 版本開始， Trident 支援在多個 Azure 雲端環境中建立和管理 Azure NetApp Files 後端。
+
+支援的 Azure 雲端包括：
+
+* Azure 商業版
+* Azure Government（Azure Government / MAG）
+* Azure 中國
+
+
+部署 Trident 或建立 Azure NetApp Files 後端時、請確保 Azure Resource Manager 和驗證端點與您的 Azure 雲端環境相符。如果端點不相符、 `tridentctl`就無法驗證、後端建立也會失敗。
+
+對於 Azure Government 後端，請在後端組態中設定 `cloudConfiguration.cloudName`：
+
+[source, yaml]
+----
+cloudConfiguration:
+  cloudName: AzureGovernment
+----
+
+
+[[required-permissions-and-resources]]
+=== 所需權限和資源
+
+如果在建立 PVC 時收到「未找到容量池」錯誤，則可能是您的應用程式註冊缺少所需的權限和資源（子網路、虛擬網路、容量池）。如果啟用了偵錯模式，Trident 會記錄建立後端時發現的 Azure 資源。請確認是否使用了適當的角色。
+
+ `resourceGroups`、 `netappAccounts`、 `capacityPools`、 `virtualNetwork` 和  `subnet` 的值可以使用短名稱或完全限定名稱來指定。大多數情況下建議使用完全限定名稱，因為短名稱可能會符合多個同名資源。
+
+
+NOTE: 如果 vNet 位於與 Azure NetApp Files（ANF）儲存帳戶不同的資源群組中，則在設定後端的 resourceGroups 清單時，請為虛擬網路指定資源群組。
+
+ `resourceGroups`、 `netappAccounts` 和  `capacityPools` 值是過濾器，用於將發現的資源集限制為此儲存後端可用的資源，並且可以以任意組合指定。完全限定名稱遵循以下格式：
+
+[cols="2"]
+|===
+| 類型 | 格式 
+
+
+| 資源群組 | <resource group> 
+
+
+| NetApp 帳戶 | <resource group>/<netapp account> 
+
+
+| 容量池 | <resource group>/<netapp account>/<capacity pool> 
+
+
+| 虛擬網路 | <resource group>/<virtual network> 
+
+
+| 子網路 | <resource group>/<virtual network>/<subnet> 
+|===
+
+
+[[volume-provisioning]]
+=== Volume 資源配置
+
+您可以透過在設定檔特定部分中指定以下選項來控制預設磁碟區配置。如需詳細資訊，請參閱 <<範例組態>>。
+
+[cols=",,"]
+|===
+| 參數 | 說明 | 預設 
+
+
+| `exportRule` | 新磁碟區的匯出規則。
+`exportRule` 必須是以逗號分隔的 IPv4 位址或 CIDR 表示法的 IPv4 子網路的任意組合清單。SMB 卷將忽略此設定。 | "0.0.0.0/0" 
+
+
+| `snapshotDir` | 存取  `.snapshot` 目錄 | `true`,  `false`（明確設定）。 
+
+
+| `size` | 新磁碟區的預設大小 | "100G" 
+
+
+| `unixPermissions` | 新磁碟區的 unix 權限（4 位八進位數字）。SMB 卷將忽略此設定。 | " （預覽功能，需在訂閱中加入白名單） 
+|===
+
+
+[[example-configurations]]
+== 範例組態
+
+以下範例展示了基本配置，其中大多數參數都保留預設值。這是定義後端最簡單的方法。
+
+.最小組態
+[%collapsible]
+====
+這是絕對最小的後端組態。使用此配置， Trident 會發現您所有的 NetApp 帳戶、容量集區和子網路（已委派給位於已設定位置的 Azure NetApp Files ），並隨機將新磁碟區放置在其中一個集區和子網路上。由於 `nasType`被省略， `nfs`預設值會套用，後端將會佈建 NFS 磁碟區。
+
+如果您剛開始使用 Azure NetApp Files 並進行嘗試，這種設定是理想的，但在實務中，您需要為預配的磁碟區提供額外的範圍。
+
+[source, yaml]
+----
+---
+apiVersion: trident.netapp.io/v1
+kind: TridentBackendConfig
+metadata:
+  name: backend-tbc-anf-1
+  namespace: trident
+spec:
+  version: 1
+  storageDriverName: azure-netapp-files
+  subscriptionID: 9f87c765-4774-fake-ae98-a721add45451
+  tenantID: 68e4f836-edc1-fake-bff9-b2d865ee56cf
+  clientID: dd043f63-bf8e-fake-8076-8de91e5713aa
+  clientSecret: SECRET
+  location: eastus
+----
+====
+.AKS 的受管理身分識別
+[%collapsible]
+====
+此後端配置省略了 `subscriptionID`、 `tenantID`、 `clientID`和 `clientSecret`，這些在使用託管身分時是可選的。
+
+[source, yaml]
+----
+apiVersion: trident.netapp.io/v1
+kind: TridentBackendConfig
+metadata:
+  name: backend-tbc-anf-1
+  namespace: trident
+spec:
+  version: 1
+  storageDriverName: azure-netapp-files
+  capacityPools:
+    - resource-group-1/netapp-account-1/ultra-pool
+  resourceGroups:
+    - resource-group-1
+  netappAccounts:
+    - resource-group-1/netapp-account-1
+  virtualNetwork: resource-group-1/eastus-prod-vnet
+  subnet: resource-group-1/eastus-prod-vnet/eastus-anf-subnet
+----
+====
+.AKS 的雲端身分
+[%collapsible]
+====
+此後端配置省略了 `tenantID`、 `clientID`和 `clientSecret`，在使用雲端身分時它們是可選的。
+
+[source, yaml]
+----
+apiVersion: trident.netapp.io/v1
+kind: TridentBackendConfig
+metadata:
+  name: backend-tbc-anf-1
+  namespace: trident
+spec:
+  version: 1
+  storageDriverName: azure-netapp-files
+  capacityPools:
+    - ultra-pool
+  resourceGroups:
+    - aks-ami-eastus-rg
+  netappAccounts:
+    - smb-na
+  virtualNetwork: eastus-prod-vnet
+  subnet: eastus-anf-subnet
+  location: eastus
+  subscriptionID: 9f87c765-4774-fake-ae98-a721add45451
+----
+====
+.具有容量資源池篩選器的特定服務等級組態
+[%collapsible]
+====
+此後端組態會將磁碟區放置在 Azure 的 `eastus`位置中的 `Ultra`容量集區。Trident 會自動探索該位置中委派給 Azure NetApp Files 的所有子網路，並隨機將新磁碟區放置在其中一個子網路上。
+
+[source, yaml]
+----
+---
+version: 1
+storageDriverName: azure-netapp-files
+subscriptionID: 9f87c765-4774-fake-ae98-a721add45451
+tenantID: 68e4f836-edc1-fake-bff9-b2d865ee56cf
+clientID: dd043f63-bf8e-fake-8076-8de91e5713aa
+clientSecret: SECRET
+location: eastus
+serviceLevel: Ultra
+capacityPools:
+  - application-group-1/account-1/ultra-1
+  - application-group-1/account-1/ultra-2
+----
+====
+.後端範例，包含手動 QoS 容量集區
+[%collapsible]
+====
+此後端配置將磁碟區放置在 Azure 的 `eastus`位置，並具有手動 QoS 容量集區。
+
+[source, yaml]
+----
+---
+version: 1
+storageDriverName: azure-netapp-files
+backendName: anf1
+location: eastus
+labels:
+  clusterName: test-cluster-1
+  cloud: anf
+  nasType: nfs
+defaults:
+  qosType: Manual
+storage:
+  - serviceLevel: Ultra
+    labels:
+      performance: gold
+    defaults:
+      maxThroughput: 10
+  - serviceLevel: Premium
+    labels:
+      performance: silver
+    defaults:
+      maxThroughput: 5
+  - serviceLevel: Standard
+    labels:
+      performance: bronze
+    defaults:
+      maxThroughput: 3
+----
+====
+.進階組態
+[%collapsible]
+====
+此後端組態進一步將磁碟區放置範圍縮小至單一子網路，同時也會修改部分磁碟區資源配置預設值。
+
+[source, yaml]
+----
+---
+version: 1
+storageDriverName: azure-netapp-files
+subscriptionID: 9f87c765-4774-fake-ae98-a721add45451
+tenantID: 68e4f836-edc1-fake-bff9-b2d865ee56cf
+clientID: dd043f63-bf8e-fake-8076-8de91e5713aa
+clientSecret: SECRET
+location: eastus
+serviceLevel: Ultra
+capacityPools:
+  - application-group-1/account-1/ultra-1
+  - application-group-1/account-1/ultra-2
+virtualNetwork: application-group-1/eastus-prod-vnet
+subnet: application-group-1/eastus-prod-vnet/my-subnet
+networkFeatures: Standard
+nfsMountOptions: vers=3,proto=tcp,timeo=600
+limitVolumeSize: 500Gi
+defaults:
+  exportRule: 10.0.0.0/24,10.0.1.0/24,10.0.2.100
+  snapshotDir: "true"
+  size: 200Gi
+  unixPermissions: "0777"
+----
+====
+.虛擬資源池組態
+[%collapsible]
+====
+此後端配置在單一檔案中定義了多個儲存池。當您有多個容量池支援不同的服務級別，並且希望在 Kubernetes 中建立代表這些容量池的儲存類別時，此配置非常有用。虛擬池標籤用於根據 `performance`來區分這些池。
+
+[source, yaml]
+----
+---
+version: 1
+storageDriverName: azure-netapp-files
+subscriptionID: 9f87c765-4774-fake-ae98-a721add45451
+tenantID: 68e4f836-edc1-fake-bff9-b2d865ee56cf
+clientID: dd043f63-bf8e-fake-8076-8de91e5713aa
+clientSecret: SECRET
+location: eastus
+resourceGroups:
+  - application-group-1
+networkFeatures: Basic
+nfsMountOptions: vers=3,proto=tcp,timeo=600
+labels:
+  cloud: azure
+storage:
+  - labels:
+      performance: gold
+    serviceLevel: Ultra
+    capacityPools:
+      - application-group-1/netapp-account-1/ultra-1
+      - application-group-1/netapp-account-1/ultra-2
+    networkFeatures: Standard
+  - labels:
+      performance: silver
+    serviceLevel: Premium
+    capacityPools:
+      - application-group-1/netapp-account-1/premium-1
+  - labels:
+      performance: bronze
+    serviceLevel: Standard
+    capacityPools:
+      - application-group-1/netapp-account-1/standard-1
+      - application-group-1/netapp-account-1/standard-2
+----
+====
+.支援的拓撲組態
+[%collapsible]
+====
+Trident 能夠根據區域和可用區為工作負載配置磁碟區。 `supportedTopologies`此後端配置中的程式碼區塊用於為每個後端提供區域和可用區清單。此處指定的區域和可用區值必須與每個 Kubernetes 叢集節點標籤中的區域和可用區值相符。這些區域和可用區代表儲存類別中可以提供的允許值清單。對於包含後端提供的區域和可用區子集的儲存類， Trident 會在指定的區域和可用區中建立磁碟區。如需詳細資訊，請參閱 link:../trident-use/csi-topology.html["使用 CSI 拓撲"]。
+
+[source, yaml]
+----
+---
+version: 1
+storageDriverName: azure-netapp-files
+subscriptionID: 9f87c765-4774-fake-ae98-a721add45451
+tenantID: 68e4f836-edc1-fake-bff9-b2d865ee56cf
+clientID: dd043f63-bf8e-fake-8076-8de91e5713aa
+clientSecret: SECRET
+location: eastus
+serviceLevel: Ultra
+capacityPools:
+  - application-group-1/account-1/ultra-1
+  - application-group-1/account-1/ultra-2
+supportedTopologies:
+  - topology.kubernetes.io/region: eastus
+    topology.kubernetes.io/zone: eastus-1
+  - topology.kubernetes.io/region: eastus
+    topology.kubernetes.io/zone: eastus-2
+----
+====
+
+
+[[storage-class-definitions]]
+== 儲存類別定義
+
+以下 `StorageClass`定義是指上述儲存資源池。
+
+
+
+[[example-definitions-using-parameter-selector-field]]
+=== 使用 `parameter.selector`欄位的範例定義
+
+使用 `parameter.selector`您可以為每個 `StorageClass`指定用於託管磁碟區的虛擬池。此磁碟區將具有所選儲存池中定義的設定項。
+
+[source, yaml]
+----
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: gold
+provisioner: csi.trident.netapp.io
+parameters:
+  selector: performance=gold
+allowVolumeExpansion: true
+
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: silver
+provisioner: csi.trident.netapp.io
+parameters:
+  selector: performance=silver
+allowVolumeExpansion: true
+
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: bronze
+provisioner: csi.trident.netapp.io
+parameters:
+  selector: performance=bronze
+allowVolumeExpansion: true
+----
+
+
+[[example-definitions-for-smb-volumes]]
+=== SMB 磁碟區的範例定義
+
+使用 `nasType`、 `node-stage-secret-name`和 `node-stage-secret-namespace`，您可以指定 SMB 磁碟區並提供所需的 Active Directory 憑證。
+
+.預設命名空間上的基本組態
+[%collapsible]
+====
+[source, yaml]
+----
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: anf-sc-smb
+provisioner: csi.trident.netapp.io
+parameters:
+  backendType: "azure-netapp-files"
+  trident.netapp.io/nasType: "smb"
+  csi.storage.k8s.io/node-stage-secret-name: "smbcreds"
+  csi.storage.k8s.io/node-stage-secret-namespace: "default"
+----
+====
+.每個命名空間使用不同的機密
+[%collapsible]
+====
+[source, yaml]
+----
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: anf-sc-smb
+provisioner: csi.trident.netapp.io
+parameters:
+  backendType: "azure-netapp-files"
+  trident.netapp.io/nasType: "smb"
+  csi.storage.k8s.io/node-stage-secret-name: "smbcreds"
+  csi.storage.k8s.io/node-stage-secret-namespace: ${pvc.namespace}
+----
+====
+.每個磁碟區使用不同的機密
+[%collapsible]
+====
+[source, yaml]
+----
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: anf-sc-smb
+provisioner: csi.trident.netapp.io
+parameters:
+  backendType: "azure-netapp-files"
+  trident.netapp.io/nasType: "smb"
+  csi.storage.k8s.io/node-stage-secret-name: ${pvc.name}
+  csi.storage.k8s.io/node-stage-secret-namespace: ${pvc.namespace}
+----
+====
+
+NOTE: `nasType: smb` 篩選支援 SMB 磁碟區的儲存池。
+`nasType: nfs` 或  `nasType: null` 篩選 NFS 儲存池。
+
+
+
+[[create-the-backend]]
+== 建立後端
+
+建立後端組態檔後，執行以下命令：
+
+[listing]
+----
+tridentctl create backend -f <backend-file>
+----
+如果您使用的是非商業版 Azure 雲端，請確保 `tridentctl`已將其設定為使用 Azure Resource Manager 和 Azure 雲端環境的驗證端點。如果後端建立失敗，請檢查後端組態並檢視記錄以判斷原因：
+
+[listing]
+----
+tridentctl logs
+----
+在您識別並修正組態檔的問題後、您可以再次執行 create 命令。

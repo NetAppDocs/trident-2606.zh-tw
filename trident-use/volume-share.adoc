@@ -1,0 +1,181 @@
+---
+sidebar: sidebar 
+permalink: trident-use/volume-share.html 
+keywords: volref, volume reference, share, pvc, pv, nfs, namespace, cvna, cross-namespace, sharing 
+summary: 使用 Trident、您可以在主命名空間中建立磁碟區、並在一個或多個次要命名空間中共用該磁碟區。 
+---
+= 跨命名空間共享 Trident NFS Volume
+:hardbreaks:
+:allow-uri-read: 
+:icons: font
+:imagesdir: ../media/
+
+
+[role="lead"]
+使用 Trident、您可以在主命名空間中建立磁碟區、並在一個或多個次要命名空間中共用該磁碟區。
+
+
+
+[[features]]
+== 功能
+
+TridentVolumeReference CR 可讓您在一個或多個 Kubernetes 命名空間之間安全地共用 ReadWriteMany（RWX）NFS 磁碟區。這種 Kubernetes 原生解決方案具有以下優勢：
+
+* 多層級存取控制以確保安全性
+* 適用於所有 Trident NFS Volume 驅動程式
+* 不依賴 tridentctl 或任何其他非原生 Kubernetes 功能
+
+
+此圖展示了跨兩個 Kubernetes 命名空間的 NFS 磁碟區共用。
+
+image::cross-namespace-sharing.png[跨命名空間共享的概念圖。]
+
+
+
+[[quick-start]]
+== 快速入門
+
+只需幾個步驟即可設定 NFS 磁碟區共用。
+
+.image:https://raw.githubusercontent.com/NetAppDocs/common/main/media/number-1.png["一"] 配置來源 PVC 以共用磁碟區
+[role="quick-margin-para"]
+來源命名空間擁有者授予存取來源 PVC 中資料的權限。
+
+.image:https://raw.githubusercontent.com/NetAppDocs/common/main/media/number-2.png["二"] 授予在目標命名空間中建立 CR 的權限
+[role="quick-margin-para"]
+叢集管理員授予目標命名空間的擁有者建立 TridentVolumeReference CR 的權限。
+
+.image:https://raw.githubusercontent.com/NetAppDocs/common/main/media/number-3.png["三"] 在目標命名空間中建立 TridentVolumeReference
+[role="quick-margin-para"]
+目標命名空間的擁有者建立 TridentVolumeReference CR 以引用來源 PVC。
+
+.image:https://raw.githubusercontent.com/NetAppDocs/common/main/media/number-4.png["四"] 在目標命名空間中建立從屬 PVC
+[role="quick-margin-para"]
+目標命名空間的擁有者建立從屬 PVC，以使用來源 PVC 中的資料來源。
+
+
+
+[[configure-the-source-and-destination-namespaces]]
+== 設定來源和目的地命名空間
+
+為確保安全，跨命名空間共用需要來源命名空間擁有者、叢集管理員和目標命名空間擁有者的協作和操作。每個步驟都會指定使用者角色。
+
+.步驟
+. *來源命名空間擁有者：* 在來源命名空間中建立 PVC(`pvc1`，該 PVC 授予與目標命名空間(`namespace2`共享的權限，使用 `shareToNamespace`註解。
++
+[source, yaml]
+----
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: pvc1
+  namespace: namespace1
+  annotations:
+    trident.netapp.io/shareToNamespace: namespace2
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: trident-csi
+  resources:
+    requests:
+      storage: 100Gi
+----
++
+Trident 會建立 PV 及其後端 NFS 儲存磁碟區。
+
++
+[NOTE]
+====
+** 您可以使用逗號分隔的清單將 PVC 共用給多個命名空間。例如， `trident.netapp.io/shareToNamespace: namespace2,namespace3,namespace4`。
+** 您可以使用  `*` 共用到所有命名空間。例如， `trident.netapp.io/shareToNamespace: *`
+** 您可以隨時更新 PVC 以包含 `shareToNamespace`註釋。
+
+
+====
+. *叢集管理員：* 確保已部署適當的基於角色的存取控制（RBAC），以授予目標命名空間擁有者在目標命名空間中建立 TridentVolumeReference CR 的權限。
+. *目標命名空間擁有者：* 在目標命名空間中建立一個 TridentVolumeReference CR，引用來源命名空間 `pvc1`。
++
+[source, yaml]
+----
+apiVersion: trident.netapp.io/v1
+kind: TridentVolumeReference
+metadata:
+  name: my-first-tvr
+  namespace: namespace2
+spec:
+  pvcName: pvc1
+  pvcNamespace: namespace1
+----
+. *目標命名空間擁有者：* 在目標命名空間 (`namespace2`）中建立一個 PVC (`pvc2`），並使用  `shareFromPVC` 註解來指定來源 PVC。
++
+[source, yaml]
+----
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  annotations:
+    trident.netapp.io/shareFromPVC: namespace1/pvc1
+  name: pvc2
+  namespace: namespace2
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: trident-csi
+  resources:
+    requests:
+      storage: 100Gi
+----
++
+
+NOTE: 目的地 PVC 的大小必須小於或等於來源 PVC。
+
+
+
+.結果
+Trident 讀取 `shareFromPVC`目標 PVC 上的註解，並將目標 PV 建立為從屬磁碟區，該磁碟區本身沒有儲存資源，指向來源 PV 並共用來源 PV 的儲存資源。目標 PVC 和 PV 看起來就像正常綁定一樣。
+
+
+
+[[delete-a-shared-volume]]
+== 刪除共享磁碟區
+
+您可以刪除跨多個命名空間共享的磁碟區。Trident 將移除來源命名空間對該磁碟區的存取權限，並保留其他共用該磁碟區的命名空間的存取權限。當所有引用該磁碟區的命名空間都被移除後，Trident 才會刪除該磁碟區。
+
+
+
+[[use-tridentctl-get-to-query-subordinate-volumes]]
+== 使用 `tridentctl get`查詢從屬磁碟區
+
+使用 [`tridentctl` 公用程式，您可以執行  `get` 命令來取得從屬磁碟區。如需詳細資訊、請參閱 link:../trident-reference/trident-cl.html[`tridentctl` 命令和選項]。
+
+[listing]
+----
+Usage:
+  tridentctl get [option]
+----
+標記：
+
+* ``-h, --help`：有關磁碟區的說明。
+* `--parentOfSubordinate string`：將查詢限制在從屬來源磁碟區。
+* `--subordinateOf string`：將查詢限制在 Volume 的下級。
+
+
+
+
+[[limitations]]
+== 限制
+
+* Trident 無法阻止目的地命名空間寫入共用磁碟區。您應該使用檔案鎖定或其他程序來防止覆寫共用磁碟區資料。
+* 您無法透過移除  `shareToNamespace` 或  `shareFromNamespace` 註解或刪除  `TridentVolumeReference` CR 來撤銷對來源 PVC 的存取權限。若要撤銷存取權限，您必須刪除從屬 PVC。
+* 從屬磁碟區無法進行 Snapshot、複本和鏡射操作。
+
+
+
+
+[[for-more-information]]
+== 如需更多資訊
+
+若要深入瞭解跨命名空間磁碟區存取：
+
+* 觀看 link:https://media.netapp.com/page/9071d19d-1438-5ed3-a7aa-ea4d73c28b7f/solutions-products["NetAppTV"^] 上的示範影片。
+

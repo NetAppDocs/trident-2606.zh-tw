@@ -1,0 +1,281 @@
+---
+sidebar: sidebar 
+permalink: trident-docker/deploy-docker.html 
+keywords: deploy, Trident, trident for docker, docker 
+summary: Trident for Docker 為 NetApp 儲存平台提供與 Docker 生態系統的直接整合。它支援從儲存平台到 Docker 主機的儲存資源配置和管理，並提供了一個框架，以便將來添加其他平台。 
+---
+= 部署 Trident
+:hardbreaks:
+:allow-uri-read: 
+:icons: font
+:imagesdir: ../media/
+
+
+[role="lead"]
+Trident for Docker 為 NetApp 儲存平台提供與 Docker 生態系統的直接整合。它支援從儲存平台到 Docker 主機的儲存資源配置和管理，並提供了一個框架，以便將來添加其他平台。
+
+Trident 的多個執行個體可以在同一主機上同時執行。這允許同時連線至多個儲存系統和儲存類型，並且能夠自訂用於 Docker 磁碟區的儲存。
+
+.您需要準備的項目
+請參閱 link:prereqs-docker.html["部署的先決條件"]。確保滿足先決條件後，即可部署 Trident。
+
+
+
+[[docker-managed-plugin-method-version-1-1317-03-and-later]]
+== Docker 管理的外掛程式方法（版本 1.13/17.03 及更新版本）
+
+.開始之前
+
+NOTE: 如果您在 Docker 1.13/17.03 之前的版本中使用過 Trident 的傳統守護程序方法，請確保在使用託管外掛程式方法之前停止 Trident 程序並重新啟動 Docker 守護程序。
+
+. 停止所有執行中的執行個體：
++
+[source, console]
+----
+pkill /usr/local/bin/netappdvp
+pkill /usr/local/bin/trident
+----
+. 重新啟動 Docker 。
++
+[source, console]
+----
+systemctl restart docker
+----
+. 請確保您已安裝 Docker Engine 17.03 （新版本 1.13）或更高版本。
++
+[source, console]
+----
+docker --version
+----
++
+如果您的版本已過時， https://docs.docker.com/engine/install/["安裝或更新您的安裝"^]。
+
+
+
+.步驟
+. 建立組態檔並依照下列方式指定選項：
++
+**  `config`：預設檔案名稱是 `config.json`，但您可以透過指定 `config`選項與檔案名稱來使用您選擇的任何名稱。設定檔必須位於主機系統的 `/etc/netappdvp`目錄中。
+** `log-level`：指定日誌等級（(`debug`、 `info`、 `warn`、 `error`、 `fatal`）。預設值為 `info`。
+** `debug`：指定是否啟用偵錯記錄。預設值為 false。如果為 true，則會覆寫 log-level。
++
+... 建立組態檔的位置：
++
+[source, console]
+----
+sudo mkdir -p /etc/netappdvp
+----
+... 建立組態檔：
++
+[source, console]
+----
+cat << EOF > /etc/netappdvp/config.json
+----
++
+[source, json]
+----
+{
+  "version": 1,
+  "storageDriverName": "ontap-nas",
+  "managementLIF": "10.0.0.1",
+  "dataLIF": "10.0.0.2",
+  "svm": "svm_nfs",
+  "username": "vsadmin",
+  "password": "password",
+  "aggregate": "aggr1"
+}
+EOF
+----
+
+
+
+
+. 使用託管外掛程式系統啟動 Trident。將 `<version>`替換為您正在使用的外掛程式版本（xxx.xx.x）。
++
+[source, console]
+----
+docker plugin install --grant-all-permissions --alias netapp netapp/trident-plugin:<version> config=myConfigFile.json
+----
+. 開始使用 Trident 從已設定的系統中取得儲存空間。
++
+.. 建立一個名為「firstVolume」的磁碟區：
++
+[source, console]
+----
+docker volume create -d netapp --name firstVolume
+----
+.. 容器啟動時建立預設磁碟區：
++
+[source, console]
+----
+docker run --rm -it --volume-driver netapp --volume secondVolume:/my_vol alpine ash
+----
+.. 移除磁碟區「firstVolume」：
++
+[source, console]
+----
+docker volume rm firstVolume
+----
+
+
+
+
+
+
+[[traditional-method-version-1-12-or-earlier]]
+== 傳統方法（1.12 版或更早版本）
+
+.開始之前
+. 請確保您使用的是 docker 版本 1.10 或更高版本。
++
+[source, console]
+----
+docker --version
+----
++
+如果您的版本過舊、請更新您的安裝。
+
++
+[source, console]
+----
+curl -fsSL https://get.docker.com/ | sh
+----
++
+或者， https://docs.docker.com/engine/install/["請依照您的發行版本說明進行操作"^]。
+
+. 請確保您的系統已配置 NFS 和 / 或 iSCSI 。
+
+
+.步驟
+. 安裝並配置 NetApp Docker Volume 插件：
++
+.. 下載並解壓縮應用程式：
++
+[source, console]
+----
+wget https://github.com/NetApp/trident/releases/download/10.0/trident-installer-26.06.0.tar.gz
+tar zxf trident-installer-26.06.0.tar.gz
+----
+.. 移至 bin 路徑中的位置：
++
+[source, console]
+----
+sudo mv trident-installer/extras/bin/trident /usr/local/bin/
+sudo chown root:root /usr/local/bin/trident
+sudo chmod 755 /usr/local/bin/trident
+----
+.. 建立組態檔的位置：
++
+[source, console]
+----
+sudo mkdir -p /etc/netappdvp
+----
+.. 建立組態檔：
++
+[source, console]
+----
+cat << EOF > /etc/netappdvp/ontap-nas.json
+----
++
+[source, json]
+----
+{
+  "version": 1,
+  "storageDriverName": "ontap-nas",
+  "managementLIF": "10.0.0.1",
+  "dataLIF": "10.0.0.2",
+  "svm": "svm_nfs",
+  "username": "vsadmin",
+  "password": "password",
+  "aggregate": "aggr1"
+}
+EOF
+----
+
+
+. 放置好二進位檔案並建立設定檔後，使用所需的設定檔啟動 Trident 守護程序。
++
+[source, console]
+----
+sudo trident --config=/etc/netappdvp/ontap-nas.json
+----
++
+
+NOTE: 除非另有指定，Volume 驅動程式的預設名稱為「netapp」。
+
++
+啟動精靈程式後，您可以使用 Docker CLI 介面來建立和管理磁碟區。
+
+. 建立磁碟區：
++
+[source, console]
+----
+docker volume create -d netapp --name trident_1
+----
+. 啟動容器時配置 Docker 磁碟區：
++
+[source, console]
+----
+docker run --rm -it --volume-driver netapp --volume trident_2:/my_vol alpine ash
+----
+. 刪除 Docker Volume ：
++
+[source, console]
+----
+docker volume rm trident_1
+----
++
+[source, console]
+----
+docker volume rm trident_2
+----
+
+
+
+
+[[start-trident-at-system-startup]]
+== 在系統啟動時啟動 Trident
+
+systemd 型系統的範例單元檔案可在 Git 儲存庫的 `contrib/trident.service.example`中找到。若要在 RHEL 中使用該檔案，請執行下列操作：
+
+. 將檔案複製到正確位置。
++
+如果您執行多個執行個體，則應為單元檔案使用唯一的名稱。
+
++
+[source, console]
+----
+cp contrib/trident.service.example /usr/lib/systemd/system/trident.service
+----
+. 編輯該檔案，將描述（第 2 行）變更為與驅動程式名稱相符，並將組態檔路徑（第 9 行）變更為反映您的環境。
+. 重新載入 systemd 以使其吸收變更：
++
+[source, console]
+----
+systemctl daemon-reload
+----
+. 啟用該服務。
++
+此名稱會根據您在  `/usr/lib/systemd/system` 目錄中為檔案命名的內容而有所不同。
+
++
+[source, console]
+----
+systemctl enable trident
+----
+. 啟動服務。
++
+[source, console]
+----
+systemctl start trident
+----
+. 檢視狀態。
++
+[source, console]
+----
+systemctl status trident
+----
+
+
+
+NOTE: 每次修改單元檔案時，都要執行  `systemctl daemon-reload` 命令使其識別變更。

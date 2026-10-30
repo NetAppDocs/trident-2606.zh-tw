@@ -1,0 +1,107 @@
+---
+sidebar: sidebar 
+permalink: trident-protect/trident-protect-generate-support-bundle.html 
+keywords: trident, protect, bundle, support, netapp, custom, resource, file 
+summary: Trident Protect 讓管理員產生包含對 NetApp 支援團隊有用的資訊的軟體包，例如受管理叢集和應用程式的日誌、指標和拓撲資訊。如果您已連接到互聯網，則可以使用自訂資源（CR）檔案將支援軟體包上傳至 NetApp 支援網站（NSS）。 
+---
+= 產生 Trident Protect 支援套件
+:hardbreaks:
+:allow-uri-read: 
+:nofooter: 
+:icons: font
+:linkattrs: 
+:imagesdir: ../media/
+
+
+[role="lead"]
+Trident Protect 讓管理員產生包含對 NetApp 支援團隊有用的資訊的軟體包，例如受管理叢集和應用程式的日誌、指標和拓撲資訊。如果您已連接到互聯網，則可以使用自訂資源（CR）檔案將支援軟體包上傳至 NetApp 支援網站（NSS）。
+
+[role="tabbed-block"]
+====
+.使用 CR 建立支援套件
+--
+.步驟
+. 建立自訂資源（CR）檔案並將其命名為（例如、 `trident-protect-support-bundle.yaml`）。
+. 設定下列屬性：
++
+** *metadata.name*：（_必填_）此自訂資源的名稱；請為您的環境選擇一個唯一且有意義的名稱。
+** *spec.triggerType*：（_必填_）確定支援包是立即產生還是定時產生。定時產生會在 UTC 時間凌晨 12 點進行。可選值：
++
+*** 已排程
+*** 手動
+
+
+** *spec.uploadEnabled*：（_選用_）控制產生支援服務包後是否應將其上傳至 NetApp 支援網站。如果未指定、則預設為 `false`。可選值：
++
+*** true
+*** false （預設）
+
+
+** *spec.dataWindowStart*：（_選用_）RFC 3339 格式的日期字串，用於指定支援套件中包含的資料視窗的起始日期和時間。如果未指定，則預設為 24 小時前。您可以指定的最早視窗日期為 7 天前。
++
+YAML 範例：
+
++
+[source, yaml]
+----
+---
+apiVersion: protect.trident.netapp.io/v1
+kind: AutoSupportBundle
+metadata:
+  name: trident-protect-support-bundle
+spec:
+  triggerType: Manual
+  uploadEnabled: true
+  dataWindowStart: 2024-05-05T12:30:00Z
+----
+
+
+. 在  `trident-protect-support-bundle.yaml` 檔案中填入正確的值後，套用 CR：
++
+[source, console]
+----
+kubectl apply -f trident-protect-support-bundle.yaml -n trident-protect
+----
+
+
+--
+.使用 CLI 建立支援套件
+--
+.步驟
+. 建立支援包，將括號中的值替換為您環境中的資訊。 `trigger-type`決定是立即建立支援包還是根據排程建立，其值可以是 `Manual`或 `Scheduled`。預設設定為 `Manual`。
++
+例如：
+
++
+[source, console]
+----
+tridentctl-protect create autosupportbundle <my-bundle-name> --trigger-type <trigger-type> -n trident-protect
+----
+
+
+--
+====
+
+
+[[monitor-and-retrieve-the-support-bundle]]
+== 監控並擷取支援服務包
+
+使用任一方法建立支援套件後，您可以監控其產生進度並將其擷取到本機系統。
+
+.步驟
+. 等待  `status.generationState` 達到  `Completed` 狀態。您可以使用以下命令監控產生進度：
++
+[source, console]
+----
+kubectl get autosupportbundle trident-protect-support-bundle -n trident-protect
+----
+. 將支援套件組合擷取至本機系統。從已完成的 AutoSupport 套件組合取得複製命令：
++
+[source, console]
+----
+kubectl describe autosupportbundle trident-protect-support-bundle -n trident-protect
+----
++
+從輸出中找到 `kubectl cp`命令並運行它，將目標參數替換為您首選的本機目錄。
+
+

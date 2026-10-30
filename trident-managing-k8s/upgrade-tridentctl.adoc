@@ -1,0 +1,34 @@
+---
+sidebar: sidebar 
+permalink: trident-managing-k8s/upgrade-tridentctl.html 
+keywords: upgrade, trident, methods, operator, tridentctl, helm 
+summary: '您可以使用 `tridentctl`輕鬆升級現有的 Trident 安裝。' 
+---
+= 使用 tridentctl 升級 Trident
+:hardbreaks:
+:allow-uri-read: 
+:icons: font
+:imagesdir: ../media/
+
+
+[role="lead"]
+您可以使用 `tridentctl`輕鬆升級現有的 Trident 安裝。
+
+.關於此任務
+解除安裝並重新安裝 Trident 相當於一次升級。卸載 Trident 時，Trident 部署使用的持久卷聲明（PVC）和持久卷（PV）不會被刪除。已配置的 PV 在 Trident 離線期間仍可用，Trident 將在恢復在線後為在此期間創建的任何 PVC 配置卷。
+
+.開始之前
+在使用 `tridentctl`進行升級之前，請先檢查link:upgrade-trident.html#step-3-select-an-upgrade-method["選擇升級方法"]。
+
+.步驟
+. 在 `tridentctl`中執行卸載指令，以移除與 Trident 相關的所有資源，但 CRD 和相關物件除外。
++
+[listing]
+----
+./tridentctl uninstall -n <namespace>
+----
+. 重新安裝 Trident 。請參閱 link:../trident-install/kubernetes-deploy-tridentctl.html["使用 tridentctl 安裝 Trident"]。
+
+
+
+IMPORTANT: 請勿中斷升級程序。確保安裝程式執行完成。

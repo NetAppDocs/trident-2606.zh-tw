@@ -1,0 +1,63 @@
+---
+sidebar: sidebar 
+permalink: trident-get-started/quickstart.html 
+keywords: kubernetes cluster, simple installation, Kubernetes installation 
+summary: 如果您剛開始使用 Kubernetes，請使用安裝 Kubernetes 的說明進行試用。這些說明提供了一個基本的單節點叢集，Trident 可以與其整合以進行示範。 
+---
+= Trident 快速入門
+:hardbreaks:
+:allow-uri-read: 
+:icons: font
+:imagesdir: ../media/
+
+
+[role="lead"]
+您可以在幾個步驟內安裝 Trident 並開始管理儲存資源。開始之前，請先檢閱link:requirements.html["Trident 需求"]。
+
+
+NOTE: 有關 Docker 的資訊，請參閱 link:../trident-docker/deploy-docker.html["Trident for Docker"]。
+
+.image:https://raw.githubusercontent.com/NetAppDocs/common/main/media/number-1.png["一"] 準備工作節點
+[role="quick-margin-para"]
+Kubernetes 叢集中的所有工作節點都必須能夠掛載您為 Pod 配置的磁碟區。
+
+[role="quick-margin-para"]
+link:../trident-use/worker-node-prep.html["準備工作節點"]
+
+.image:https://raw.githubusercontent.com/NetAppDocs/common/main/media/number-2.png["二"] 安裝 Trident
+[role="quick-margin-para"]
+Trident 提供多種安裝方法和模式，並針對各種環境和組織進行了最佳化。
+
+[role="quick-margin-para"]
+link:../trident-install/kubernetes-deploy.html["安裝 Trident"]
+
+.image:https://raw.githubusercontent.com/NetAppDocs/common/main/media/number-3.png["三"] 建立後端
+[role="quick-margin-para"]
+後端定義了 Trident 與儲存系統之間的關係。它告訴 Trident 如何與儲存系統通信，以及 Trident 應該如何從中配置磁碟區。
+
+[role="quick-margin-para"]
+link:../trident-use/backends.html["配置後端"] 適用於您的儲存系統
+
+.image:https://raw.githubusercontent.com/NetAppDocs/common/main/media/number-4.png["四"] 建立 Kubernetes StorageClass
+[role="quick-margin-para"]
+Kubernetes StorageClass 物件指定 Trident 作為儲存配置器，並允許您建立儲存類別來配置具有可自訂屬性的磁碟區。Trident 會為指定 Trident 儲存配置器的 Kubernetes 物件建立相符的儲存類別。
+
+[role="quick-margin-para"]
+link:../trident-use/create-stor-class.html["建立儲存類別"]
+
+.image:https://raw.githubusercontent.com/NetAppDocs/common/main/media/number-5.png["五"] 配置磁碟區
+[role="quick-margin-para"]
+_PersistentVolume_ (PV) 是叢集管理員在 Kubernetes 叢集上配置的實體儲存資源。_PersistentVolumeClaim_ (PVC) 是對叢集上 PersistentVolume 的存取請求。
+
+[role="quick-margin-para"]
+建立一個 PersistentVolume（PV）和一個 PersistentVolumeClaim（PVC），使用已設定的 Kubernetes StorageClass 來請求存取 PV。然後，您可以將 PV 掛載到 Pod 中。
+
+[role="quick-margin-para"]
+link:../trident-use/vol-provision.html["配置磁碟區"]
+
+
+
+[[whats-next]]
+== 接下來呢？
+
+現在您可以新增其他後端、管理儲存類別、管理後端以及執行 Volume 操作。

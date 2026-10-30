@@ -1,0 +1,665 @@
+---
+sidebar: sidebar 
+permalink: trident-protect/trident-protect-restore-apps.html 
+keywords: trident, protect, restore, data, backup 
+summary: 您可以使用 Trident Protect 從快照或備份還原應用程式。如果要將應用程式還原到同一個叢集，從現有快照還原速度會更快。 
+---
+= 使用 Trident Protect 恢復應用程式
+:hardbreaks:
+:allow-uri-read: 
+:nofooter: 
+:icons: font
+:linkattrs: 
+:imagesdir: ../media/
+
+
+[role="lead"]
+您可以使用 Trident Protect 從快照或備份還原應用程式。如果要將應用程式還原到同一個叢集，從現有快照還原速度會更快。
+
+[NOTE]
+====
+* 還原應用程式時，所有為該應用程式配置的執行鉤子都會隨應用程式一起還原。如果存在復原後執行鉤子，它會在復原操作過程中自動執行。
+* qtree 磁碟區支援從備份還原到不同的命名空間或原始命名空間。但是，qtree 磁碟區不支援從快照還原到不同的命名空間或原始命名空間。
+* 您可以使用進階設定來自訂還原操作。若要深入瞭解，請參閱 link:../trident-protect/trident-protect-restore-settings.html["使用進階 Trident Protect 還原設定"]。
+* 若要從歸檔中復原特定的 KubeVirt 虛擬機器 (VM) 而不還原所有命名空間資源，請使用復原 CR 上的 `includedVirtualMachines`欄位。有關支援的 CR、欄位參考和 YAML 範例，請參閱link:trident-protect-kubevirt-vms.html["使用 Trident Protect 保護 KubeVirt 虛擬機器"]。
+
+
+====
+
+
+[[restore-from-a-backup-to-a-different-namespace]]
+== 從備份還原到不同的命名空間
+
+當您使用 BackupRestore CR 將備份還原到不同的命名空間時，Trident Protect 會在新的命名空間中還原應用程式，並為還原後的應用程式建立一個應用程式 CR。若要保護還原的應用程式，您可以建立隨需備份或快照，或建立保護排程。
+
+[NOTE]
+====
+* 將備份還原到具有現有資源的不同命名空間不會變更與備份中資源同名的任何資源。若要還原備份中的所有資源，請刪除並重新建立目標命名空間，或將備份還原到新的命名空間。
+* 使用 CR 還原到新命名空間時，必須先手動建立目標命名空間，然後再套用 CR。Trident Protect 僅在使用 CLI 時才會自動建立命名空間。
+
+
+====
+.開始之前
+請確保 AWS 工作階段權杖的有效期限足以應付任何長時間執行的 s3 還原作業。如果權杖在還原作業期間過期、作業可能會失敗。
+
+* 有關檢查當前會話令牌過期時間的更多資訊，請參閱 https://docs.aws.amazon.com/STS/latest/APIReference/API_GetSessionToken.html["AWS API 說明文件"^]。
+* 如需 AWS 資源憑證的詳細資訊，請參閱 https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_temp_use-resources.html["AWS IAM 說明文件"^]。
+
+
+
+NOTE: 當您使用 Kopia 作為資料移動工具還原備份時，您可以選擇在 CR 中或使用 CLI 指定註釋，以控制 Kopia 使用的暫存的行為。有關可配置選項的更多資訊，請參閱 https://kopia.io/docs/getting-started/["Kopia 說明文件"^]。使用 `tridentctl-protect create --help`命令以取得有關使用 Trident Protect CLI 指定註釋的更多資訊。
+
+[role="tabbed-block"]
+====
+.使用 CR
+--
+.步驟
+. 建立自訂資源（CR）檔案並將其命名為 `trident-protect-backup-restore-cr.yaml`。
+. 在您建立的檔案中、設定以下屬性：
++
+** *metadata.name*：（_必填_）此自訂資源的名稱；請為您的環境選擇一個唯一且有意義的名稱。
+** *spec.appArchivePath*：AppVault 內儲存備份內容的路徑。您可以使用以下命令來尋找此路徑：
++
+[source, console]
+----
+kubectl get backups <BACKUP_NAME> -n my-app-namespace -o jsonpath='{.status.appArchivePath}'
+----
+** *spec.appVaultRef*：（_必填_）儲存備份內容的 AppVault 名稱。
+** *spec.destinationApplicationName*：（_選用_）還原應用程式的名稱。如果提供、還原的應用程式會使用此名稱。如果未提供、還原的應用程式會使用來源應用程式名稱。
+** *spec.namespaceMapping*：復原作業的來源命名空間到目標命名空間的對應。請將 `my-source-namespace`和 `my-destination-namespace`替換為您環境中的資訊。
++
+[source, yaml]
+----
+---
+apiVersion: protect.trident.netapp.io/v1
+kind: BackupRestore
+metadata:
+  name: my-cr-name
+  namespace: my-destination-namespace
+spec:
+  appArchivePath: my-backup-path
+  appVaultRef: appvault-name
+  destinationApplicationName: my-new-app-name
+  namespaceMapping: [{"source": "my-source-namespace", "destination": "my-destination-namespace"}]
+----
+
+
+. （可選）如果您只需要選擇應用程式的某些資源進行恢復，請新增篩選條件，以包含或排除帶有特定標籤的資源：
++
+
+NOTE: Trident Protect 會自動選擇一些資源，因為它們與您選擇的資源有關聯。例如，如果您選擇了持續性磁碟區宣告資源，且該資源關聯了一個 Pod，則 Trident Protect 也會還原該關聯 Pod。
+
++
+** *resourceFilter.resourceSelectionCriteria*：（篩選必需）使用 `Include`或 `Exclude`來包含或排除在 resourceMatchers 中定義的資源。新增以下 resourceMatchers 參數以定義要包含或排除的資源：
++
+*** *resourceFilter.resourceMatchers*：resourceMatcher 物件的陣列。如果在此陣列中定義多個元素，它們之間將按 OR 運算匹配，每個元素內的欄位（group、kind、version）之間將按 AND 運算匹配。
++
+**** *resourceMatchers[].group*：（_可選_）要篩選的資源群組。
+**** *resourceMatchers[].kind*：（_可選_）要篩選的資源類型。
+**** *resourceMatchers[].version*：（_可選_）要篩選的資源版本。
+**** *resourceMatchers[].names*：（_可選_）要過濾的資源的 Kubernetes metadata.name 欄位中的名稱。
+**** *resourceMatchers[].namespaces*：（_可選_）要篩選的資源的 Kubernetes metadata.name 欄位中的命名空間。
+**** *resourceMatchers[].labelSelectors*：（_可選_）資源在 Kubernetes metadata.name 欄位中定義的標籤選擇器字串 https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#label-selectors["Kubernetes 說明文件"^]。例如： `"trident.netapp.io/os=linux"`。
++
+例如：
+
++
+[source, yaml]
+----
+spec:
+  resourceFilter:
+    resourceSelectionCriteria: "Include"
+    resourceMatchers:
+      - group: my-resource-group-1
+        kind: my-resource-kind-1
+        version: my-resource-version-1
+        names: ["my-resource-names"]
+        namespaces: ["my-resource-namespaces"]
+        labelSelectors: ["trident.netapp.io/os=linux"]
+      - group: my-resource-group-2
+        kind: my-resource-kind-2
+        version: my-resource-version-2
+        names: ["my-resource-names"]
+        namespaces: ["my-resource-namespaces"]
+        labelSelectors: ["trident.netapp.io/os=linux"]
+----
+
+
+
+
+
+
+. 在  `trident-protect-backup-restore-cr.yaml` 檔案中填入正確的值後，套用 CR：
++
+[source, console]
+----
+kubectl apply -f trident-protect-backup-restore-cr.yaml
+----
+
+
+--
+.使用 CLI
+--
+.步驟
+. 將備份還原到不同的命名空間，並將方括號中的值替換為您環境中的資訊。 `namespace-mapping`引數使用冒號分隔的命名空間，將來源命名空間對應到正確的目標命名空間，格式為 `source1:dest1,source2:dest2`。例如：
++
+[source, console]
+----
+tridentctl-protect create backuprestore <my_restore_name> \
+--backup <backup_namespace>/<backup_to_restore> \
+--namespace-mapping <source_to_destination_namespace_mapping> \ --destination-app-name<custom_app_name>\
+-n <application_namespace>
+----
+
+
+--
+====
+
+
+[[restore-from-a-backup-to-the-original-namespace]]
+== 從備份還原到原始命名空間
+
+您可以隨時將備份還原到原始命名空間。執行就地還原時，Trident Protect 會自動管理保護排程和進行中的作業，以防止無效的還原點：
+
+* 在還原開始之前，應用程式的所有已啟用保護排程都會停用。這可防止在還原應用程式資源時執行排程的備份或快照。
+* 恢復成功完成後，只有恢復前已啟用的排程會重新啟用。先前已停用的排程仍保持停用狀態。
+* 任何正在進行的備份或快照操作都會在還原開始前取消。如果操作在 5 分鐘內未取消，則還原將繼續進行，並在還原 CR 狀態中記錄警告。
+
+
+.開始之前
+請確保 AWS 工作階段權杖的有效期限足以應付任何長時間執行的 s3 還原作業。如果權杖在還原作業期間過期、作業可能會失敗。
+
+* 有關檢查當前會話令牌過期時間的更多資訊，請參閱 https://docs.aws.amazon.com/STS/latest/APIReference/API_GetSessionToken.html["AWS API 說明文件"^]。
+* 如需 AWS 資源憑證的詳細資訊，請參閱 https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_temp_use-resources.html["AWS IAM 說明文件"^]。
+
+
+
+NOTE: 當您使用 Kopia 作為資料移動工具還原備份時，您可以選擇在 CR 中或使用 CLI 指定註釋，以控制 Kopia 使用的暫存的行為。有關可配置選項的更多資訊，請參閱 https://kopia.io/docs/getting-started/["Kopia 說明文件"^]。使用 `tridentctl-protect create --help`命令以取得有關使用 Trident Protect CLI 指定註釋的更多資訊。
+
+[role="tabbed-block"]
+====
+.使用 CR
+--
+.步驟
+. 建立自訂資源（CR）檔案並將其命名為 `trident-protect-backup-ipr-cr.yaml`。
+. 在您建立的檔案中、設定以下屬性：
++
+** *metadata.name*：（_必填_）此自訂資源的名稱；請為您的環境選擇一個唯一且有意義的名稱。
+** *spec.appArchivePath*：AppVault 內儲存備份內容的路徑。您可以使用以下命令來尋找此路徑：
++
+[source, console]
+----
+kubectl get backups <BACKUP_NAME> -n my-app-namespace -o jsonpath='{.status.appArchivePath}'
+----
+** *spec.appVaultRef*：（_必填_）儲存備份內容的 AppVault 名稱。
++
+例如：
+
++
+[source, yaml]
+----
+---
+apiVersion: protect.trident.netapp.io/v1
+kind: BackupInplaceRestore
+metadata:
+  name: my-cr-name
+  namespace: my-app-namespace
+spec:
+  appArchivePath: my-backup-path
+  appVaultRef: appvault-name
+----
+
+
+. （可選）如果您只需要選擇應用程式的某些資源進行恢復，請新增篩選條件，以包含或排除帶有特定標籤的資源：
++
+
+NOTE: Trident Protect 會自動選擇一些資源，因為它們與您選擇的資源有關聯。例如，如果您選擇了持續性磁碟區宣告資源，且該資源關聯了一個 Pod，則 Trident Protect 也會還原該關聯 Pod。
+
++
+** *resourceFilter.resourceSelectionCriteria*：（篩選必需）使用 `Include`或 `Exclude`來包含或排除在 resourceMatchers 中定義的資源。新增以下 resourceMatchers 參數以定義要包含或排除的資源：
++
+*** *resourceFilter.resourceMatchers*：resourceMatcher 物件的陣列。如果在此陣列中定義多個元素，它們之間將按 OR 運算匹配，每個元素內的欄位（group、kind、version）之間將按 AND 運算匹配。
++
+**** *resourceMatchers[].group*：（_可選_）要篩選的資源群組。
+**** *resourceMatchers[].kind*：（_可選_）要篩選的資源類型。
+**** *resourceMatchers[].version*：（_可選_）要篩選的資源版本。
+**** *resourceMatchers[].names*：（_可選_）要過濾的資源的 Kubernetes metadata.name 欄位中的名稱。
+**** *resourceMatchers[].namespaces*：（_可選_）要篩選的資源的 Kubernetes metadata.name 欄位中的命名空間。
+**** *resourceMatchers[].labelSelectors*：（_可選_）資源在 Kubernetes metadata.name 欄位中定義的標籤選擇器字串 https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#label-selectors["Kubernetes 說明文件"^]。例如： `"trident.netapp.io/os=linux"`。
++
+例如：
+
++
+[source, yaml]
+----
+spec:
+  resourceFilter:
+    resourceSelectionCriteria: "Include"
+    resourceMatchers:
+      - group: my-resource-group-1
+        kind: my-resource-kind-1
+        version: my-resource-version-1
+        names: ["my-resource-names"]
+        namespaces: ["my-resource-namespaces"]
+        labelSelectors: ["trident.netapp.io/os=linux"]
+      - group: my-resource-group-2
+        kind: my-resource-kind-2
+        version: my-resource-version-2
+        names: ["my-resource-names"]
+        namespaces: ["my-resource-namespaces"]
+        labelSelectors: ["trident.netapp.io/os=linux"]
+----
+
+
+
+
+
+
+. 在  `trident-protect-backup-ipr-cr.yaml` 檔案中填入正確的值後，套用 CR：
++
+[source, console]
+----
+kubectl apply -f trident-protect-backup-ipr-cr.yaml
+----
+
+
+--
+.使用 CLI
+--
+.步驟
+. 將備份還原到原始命名空間，並將方括號中的值替換為您環境中的資訊。 `backup` 參數使用命名空間和備份名稱，格式為 `<namespace>/<name>`。例如：
++
+[source, console]
+----
+tridentctl-protect create backupinplacerestore <my_restore_name> \
+--backup <namespace/backup_to_restore> \
+-n <application_namespace>
+----
+
+
+--
+====
+
+
+[[restore-from-a-backup-to-a-different-cluster]]
+== 從備份還原到不同的叢集
+
+如果原始叢集出現問題、您可以將備份還原至不同的叢集。
+
+[NOTE]
+====
+* 當您使用 Kopia 作為資料移動工具還原備份時，您可以選擇在 CR 中或使用 CLI 指定註釋，以控制 Kopia 使用的暫存的行為。有關可配置選項的更多資訊，請參閱 https://kopia.io/docs/getting-started/["Kopia 說明文件"^]。使用 `tridentctl-protect create --help`命令以取得有關使用 Trident Protect CLI 指定註釋的更多資訊。
+* 使用 CR 還原到新命名空間時，必須先手動建立目標命名空間，然後再套用 CR。Trident Protect 僅在使用 CLI 時才會自動建立命名空間。
+
+
+====
+.開始之前
+請確保符合下列先決條件：
+
+* 目標叢集已安裝 Trident Protect。
+* 目標叢集可以存取與來源叢集相同的 AppVault 儲存桶路徑，備份檔案就儲存在該路徑中。
+* 執行 `tridentctl-protect get appvaultcontent`命令時，請確保本機環境可以連接到 AppVault CR 中定義的物件儲存桶。如果網路限制導致無法存取，請改為在目標叢集的 Pod 內執行 Trident Protect CLI。
+* 請確保 AWS 工作階段權杖的有效期限足以應付任何長時間執行的還原作業。如果權杖在還原作業期間過期、作業可能會失敗。
++
+** 有關檢查當前會話令牌過期時間的更多資訊，請參閱 https://docs.aws.amazon.com/STS/latest/APIReference/API_GetSessionToken.html["AWS API 說明文件"^]。
+** 如需 AWS 資源憑證的詳細資訊，請參閱 https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_temp_use-resources.html["AWS 文件"^]。
+
+
+
+
+.步驟
+. 使用 Trident Protect CLI 外掛程式驗證 AppVault CR 是否存在於目標叢集上：
++
+[source, console]
+----
+tridentctl-protect get appvault --context <destination_cluster_name>
+----
++
+
+NOTE: 如果目標叢集上不存在 AppVault CR，請按照 link:trident-protect-appvault-custom-resources.html["使用 Trident Protect AppVault 物件來管理儲存桶"] 中的步驟建立它。
+
+. 查看目標叢集上可用 AppVault 的備份內容，並記下 `appArchivePath`要還原的備份：
++
+[source, console]
+----
+tridentctl-protect get appvaultcontent <appvault_name> \
+--show-resources backup \
+--show-paths \
+--context <destination_cluster_name>
+----
++
+執行此命令將顯示 AppVault 中的可用備份，包括其來源叢集、相應的應用程式名稱、時間戳記和歸檔路徑。
+
++
+*範例輸出：*
+
++
+[listing]
+----
++-------------+-----------+--------+-----------------+--------------------------+-------------+
+|   CLUSTER   |    APP    |  TYPE  |      NAME       |        TIMESTAMP         |    PATH     |
++-------------+-----------+--------+-----------------+--------------------------+-------------+
+| production1 | wordpress | backup | wordpress-bkup-1| 2024-10-30 08:37:40 (UTC)| backuppath1 |
+| production1 | wordpress | backup | wordpress-bkup-2| 2024-10-30 08:37:40 (UTC)| backuppath2 |
++-------------+-----------+--------+-----------------+--------------------------+-------------+
+----
+. 使用 AppVault 名稱和歸檔路徑將應用程式還原到目標叢集：
+
+
+
+NOTE: 使用 CR 時，請確保用於應用程式還原的命名空間存在於目的地叢集上。
+
+[role="tabbed-block"]
+====
+.使用 CR
+--
+. 建立自訂資源（CR）檔案並將其命名為 `trident-protect-backup-restore-cr.yaml`。
+. 在您建立的檔案中、設定以下屬性：
++
+** *metadata.name*：（_必填_）此自訂資源的名稱；請為您的環境選擇一個唯一且有意義的名稱。
+** *spec.appVaultRef*：（_必填_）儲存備份內容的 AppVault 名稱。
+** *spec.appArchivePath*：（_必填_）AppVault 內儲存備份內容的路徑。使用步驟 2 中的指令查看備份內容，並找到 `appArchivePath`要還原的備份。
+** *spec.destinationApplicationName*：（_選用_）還原應用程式的名稱。如果提供、還原的應用程式會使用此名稱。如果未提供、還原的應用程式會使用來源應用程式名稱。
+** *spec.namespaceMapping*：復原作業的來源命名空間到目標命名空間的對應。請將 `my-source-namespace`和 `my-destination-namespace`替換為您環境中的資訊。
++
+例如：
+
++
+[source, yaml]
+----
+apiVersion: protect.trident.netapp.io/v1
+kind: BackupRestore
+metadata:
+  name: my-cr-name
+  namespace: my-destination-namespace
+spec:
+  appVaultRef: appvault-name
+  appArchivePath: my-backup-path
+  destinationApplicationName: my-new-app-name
+  namespaceMapping: [{"source": "my-source-namespace", "destination": "my-destination-namespace"}]
+----
+
+
+. 在  `trident-protect-backup-restore-cr.yaml` 檔案中填入正確的值後，套用 CR：
++
+[source, console]
+----
+kubectl apply -f trident-protect-backup-restore-cr.yaml
+----
+
+
+--
+.使用 CLI
+--
+. 使用以下命令恢復應用程式，並將方括號中的值替換為您環境中的資訊。命名空間映射參數使用冒號分隔的命名空間，將來源命名空間對應到正確的目標命名空間，格式為 source1:dest1,source2:dest2。例如：
++
+[source, console]
+----
+tridentctl-protect create backuprestore <restore_name> \
+--namespace-mapping <source_to_destination_namespace_mapping> \
+--appvault <appvault_name> \
+--path <backup_path> \
+--destination-app-name <custom_app_name> \
+--context <destination_cluster_name> \
+-n <application_namespace>
+----
+
+
+--
+====
+
+
+[[restore-from-a-snapshot-to-a-different-namespace]]
+== 從快照還原到不同的命名空間
+
+您可以使用自訂資源（CR）檔案從快照還原資料，還原到不同的命名空間或原始來源命名空間。當您使用 SnapshotRestore CR 將快照還原到不同的命名空間時，Trident Protect 會在新的命名空間中還原應用程式，並為還原的應用程式建立一個應用程式 CR。若要保護還原的應用程式，您可以建立隨需備份或快照，或建立保護排程。
+
+[NOTE]
+====
+* SnapshotRestore 支援  `spec.storageClassMapping` 屬性，但僅當來源儲存類別和目標儲存類別使用相同的儲存後端時才支援。如果嘗試還原到使用不同儲存後端的  `StorageClass`，則還原操作將會失敗。
+* 使用 CR 還原到新命名空間時，必須先手動建立目標命名空間，然後再套用 CR。Trident Protect 僅在使用 CLI 時才會自動建立命名空間。
+
+
+====
+.開始之前
+請確保 AWS 工作階段權杖的有效期限足以應付任何長時間執行的 s3 還原作業。如果權杖在還原作業期間過期、作業可能會失敗。
+
+* 有關檢查當前會話令牌過期時間的更多資訊，請參閱 https://docs.aws.amazon.com/STS/latest/APIReference/API_GetSessionToken.html["AWS API 說明文件"^]。
+* 如需 AWS 資源憑證的詳細資訊，請參閱 https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_temp_use-resources.html["AWS IAM 說明文件"^]。
+
+
+[role="tabbed-block"]
+====
+.使用 CR
+--
+.步驟
+. 建立自訂資源（CR）檔案並將其命名為 `trident-protect-snapshot-restore-cr.yaml`。
+. 在您建立的檔案中、設定以下屬性：
++
+** *metadata.name*：（_必填_）此自訂資源的名稱；請為您的環境選擇一個唯一且有意義的名稱。
+** *spec.appVaultRef*：（_必填_）儲存快照內容的 AppVault 名稱。
+** *spec.appArchivePath*：AppVault 內儲存快照內容的路徑。您可以使用以下命令來尋找此路徑：
++
+[source, console]
+----
+kubectl get snapshots <SNAPHOT_NAME> -n my-app-namespace -o jsonpath='{.status.appArchivePath}'
+----
+** *spec.destinationApplicationName*：（_選用_）還原應用程式的名稱。如果提供、還原的應用程式會使用此名稱。如果未提供、還原的應用程式會使用來源應用程式名稱。
+** *spec.namespaceMapping*：復原作業的來源命名空間到目標命名空間的對應。請將 `my-source-namespace`和 `my-destination-namespace`替換為您環境中的資訊。
++
+[source, yaml]
+----
+---
+apiVersion: protect.trident.netapp.io/v1
+kind: SnapshotRestore
+metadata:
+  name: my-cr-name
+  namespace: my-destination-namespace
+spec:
+  appVaultRef: appvault-name
+  appArchivePath: my-snapshot-path
+  namespaceMapping: [{"source": "my-source-namespace", "destination": "my-destination-namespace"}]
+----
+
+
+. （可選）如果您只需要選擇應用程式的某些資源進行恢復，請新增篩選條件，以包含或排除帶有特定標籤的資源：
++
+
+NOTE: Trident Protect 會自動選擇一些資源，因為它們與您選擇的資源有關聯。例如，如果您選擇了持續性磁碟區宣告資源，且該資源關聯了一個 Pod，則 Trident Protect 也會還原該關聯 Pod。
+
++
+** *resourceFilter.resourceSelectionCriteria*：（篩選必需）使用 `Include`或 `Exclude`來包含或排除在 resourceMatchers 中定義的資源。新增以下 resourceMatchers 參數以定義要包含或排除的資源：
++
+*** *resourceFilter.resourceMatchers*：resourceMatcher 物件的陣列。如果在此陣列中定義多個元素，它們之間將按 OR 運算匹配，每個元素內的欄位（group、kind、version）之間將按 AND 運算匹配。
++
+**** *resourceMatchers[].group*：（_可選_）要篩選的資源群組。
+**** *resourceMatchers[].kind*：（_可選_）要篩選的資源類型。
+**** *resourceMatchers[].version*：（_可選_）要篩選的資源版本。
+**** *resourceMatchers[].names*：（_可選_）要過濾的資源的 Kubernetes metadata.name 欄位中的名稱。
+**** *resourceMatchers[].namespaces*：（_可選_）要篩選的資源的 Kubernetes metadata.name 欄位中的命名空間。
+**** *resourceMatchers[].labelSelectors*：（_可選_）資源在 Kubernetes metadata.name 欄位中定義的標籤選擇器字串 https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#label-selectors["Kubernetes 說明文件"^]。例如： `"trident.netapp.io/os=linux"`。
++
+例如：
+
++
+[source, yaml]
+----
+spec:
+  resourceFilter:
+    resourceSelectionCriteria: "Include"
+    resourceMatchers:
+      - group: my-resource-group-1
+        kind: my-resource-kind-1
+        version: my-resource-version-1
+        names: ["my-resource-names"]
+        namespaces: ["my-resource-namespaces"]
+        labelSelectors: ["trident.netapp.io/os=linux"]
+      - group: my-resource-group-2
+        kind: my-resource-kind-2
+        version: my-resource-version-2
+        names: ["my-resource-names"]
+        namespaces: ["my-resource-namespaces"]
+        labelSelectors: ["trident.netapp.io/os=linux"]
+----
+
+
+
+
+
+
+. 在  `trident-protect-snapshot-restore-cr.yaml` 檔案中填入正確的值後，套用 CR：
++
+[source, console]
+----
+kubectl apply -f trident-protect-snapshot-restore-cr.yaml
+----
+
+
+--
+.使用 CLI
+--
+.步驟
+. 將快照還原到不同的命名空間，並將括號中的值替換為您環境中的資訊。
++
+**  `snapshot`引數使用命名空間和快照名稱，格式為 `<namespace>/<name>`。
+**  `namespace-mapping`引數使用冒號分隔的命名空間，將來源命名空間對應到正確的目標命名空間，格式為 `source1:dest1,source2:dest2`。
++
+例如：
+
++
+[source, console]
+----
+tridentctl-protect create snapshotrestore <my_restore_name> \
+--snapshot <namespace/snapshot_to_restore> \
+--namespace-mapping <source_to_destination_namespace_mapping> \
+--destination-app-name <custom_app_name> \
+-n <application_namespace>
+----
+
+
+
+
+--
+====
+
+
+[[restore-from-a-snapshot-to-the-original-namespace]]
+== 從快照還原到原始命名空間
+
+您可以隨時將快照還原到原始命名空間。執行就地還原時，Trident Protect 會自動管理保護排程和進行中的作業，以防止無效的還原點：
+
+* 在還原開始之前，應用程式的所有已啟用保護排程都會停用。這可防止在還原應用程式資源時執行排程的備份或快照。
+* 恢復成功完成後，只有恢復前已啟用的排程會重新啟用。先前已停用的排程仍保持停用狀態。
+* 任何正在進行的備份或快照操作都會在還原開始前取消。如果操作在 5 分鐘內未取消，則還原將繼續進行，並在還原 CR 狀態中記錄警告。
+
+
+.開始之前
+請確保 AWS 工作階段權杖的有效期限足以應付任何長時間執行的 s3 還原作業。如果權杖在還原作業期間過期、作業可能會失敗。
+
+* 有關檢查當前會話令牌過期時間的更多資訊，請參閱 https://docs.aws.amazon.com/STS/latest/APIReference/API_GetSessionToken.html["AWS API 說明文件"^]。
+* 如需 AWS 資源憑證的詳細資訊，請參閱 https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_temp_use-resources.html["AWS IAM 說明文件"^]。
+
+
+[role="tabbed-block"]
+====
+.使用 CR
+--
+.步驟
+. 建立自訂資源（CR）檔案並將其命名為 `trident-protect-snapshot-ipr-cr.yaml`。
+. 在您建立的檔案中、設定以下屬性：
++
+** *metadata.name*：（_必填_）此自訂資源的名稱；請為您的環境選擇一個唯一且有意義的名稱。
+** *spec.appVaultRef*：（_必填_）儲存快照內容的 AppVault 名稱。
+** *spec.appArchivePath*：AppVault 內儲存快照內容的路徑。您可以使用以下命令來尋找此路徑：
++
+[source, console]
+----
+kubectl get snapshots <SNAPSHOT_NAME> -n my-app-namespace -o jsonpath='{.status.appArchivePath}'
+----
++
++
+
+
+
+
+
+[listing]
+----
+---
+apiVersion: protect.trident.netapp.io/v1
+kind: SnapshotInplaceRestore
+metadata:
+  name: my-cr-name
+  namespace: my-app-namespace
+spec:
+  appVaultRef: appvault-name
+  appArchivePath: my-snapshot-path
+----
++ .（可選）如果您只需要選擇應用程式的某些資源進行恢復，請新增篩選條件，以包含或排除帶有特定標籤的資源：
+
++ 注意： Trident Protect 會自動選擇某些資源，因為它們與您選擇的資源有關聯。例如，如果您選擇了持續性磁碟區宣告資源，且該資源關聯了一個 Pod，則 Trident Protect 也會還原該關聯 Pod。
+
++ * *resourceFilter.resourceSelectionCriteria*: （過濾必要）使用 `Include`或 `Exclude`來包含或排除在 resourceMatchers 中定義的資源。新增下列 resourceMatchers 參數來定義要包含或排除的資源：** *resourceFilter.resourceMatchers*：resourceMatcher 物件的陣列。如果在此陣列中定義多個元素，它們之間將按 OR 運算匹配，每個元素內的欄位（group、kind、version）之間將按 AND 運算匹配。*** *resourceMatchers[].group*: （_可選_）要篩選的資源群組。*** *resourceMatchers[].kind*: （_可選_）要篩選的資源種類。*** *resourceMatchers[].version*: （_可選_）要篩選的資源版本。*** *resourceMatchers[].names*: （_可選_）要篩選的資源的 Kubernetes metadata.name 欄位中的名稱。*** *resourceMatchers[].namespaces*: （_可選_）要篩選的資源的 Kubernetes metadata.name 欄位中的命名空間。*** *resourceMatchers[].labelSelectors*: （_可選_）資源的 Kubernetes metadata.name 欄位中的標籤選擇器字串，如 https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#label-selectors["Kubernetes 說明文件"^]中所定義。例如： `"trident.netapp.io/os=linux"`。
+
++ 例如：
+
++
+
+[source, yaml]
+----
+spec:
+  resourceFilter:
+    resourceSelectionCriteria: "Include"
+    resourceMatchers:
+      - group: my-resource-group-1
+        kind: my-resource-kind-1
+        version: my-resource-version-1
+        names: ["my-resource-names"]
+        namespaces: ["my-resource-namespaces"]
+        labelSelectors: ["trident.netapp.io/os=linux"]
+      - group: my-resource-group-2
+        kind: my-resource-kind-2
+        version: my-resource-version-2
+        names: ["my-resource-names"]
+        namespaces: ["my-resource-namespaces"]
+        labelSelectors: ["trident.netapp.io/os=linux"]
+----
++ .在  `trident-protect-snapshot-ipr-cr.yaml` 檔案中填入正確的值後，套用 CR：
+
++
+
+[source, console]
+----
+kubectl apply -f trident-protect-snapshot-ipr-cr.yaml
+----
+--
+.使用 CLI
+--
+.步驟
+. 將快照還原到原始命名空間，並將方括號中的值替換為您環境中的資訊。例如：
++
+[source, console]
+----
+tridentctl-protect create snapshotinplacerestore <my_restore_name> \
+--snapshot <namespace/snapshot_to_restore> \
+-n <application_namespace>
+----
+
+
+--
+====
+
+
+[[check-the-status-of-a-restore-operation]]
+== 檢查還原作業的狀態
+
+您可以使用命令列來檢查正在進行、已完成或已失敗的還原作業狀態。
+
+.步驟
+. 使用以下命令檢索還原作業的狀態，將方括號中的值替換為您環境中的資訊：
++
+[source, console]
+----
+kubectl get backuprestore -n <namespace_name> <my_restore_cr_name> -o jsonpath='{.status}'
+----
+

@@ -1,0 +1,103 @@
+---
+sidebar: sidebar 
+permalink: trident-docker/upgrade-uninstall-docker.html 
+keywords: uninstall, Trident, trident for docker, docker, upgrade trident for docker 
+summary: '您可以安全地升級 Trident for Docker，不會對正在使用的磁碟區造成任何影響。升級過程中，會有一段短暫的時間 `docker volume`針對該插件的命令將無法執行，應用程式將無法掛載磁碟區，直到該插件重新啟動。大多數情況下，這只需幾秒鐘。' 
+---
+= 升級或解除安裝 Trident
+:hardbreaks:
+:allow-uri-read: 
+:icons: font
+:imagesdir: ../media/
+
+
+[role="lead"]
+您可以安全地升級 Trident for Docker，不會對正在使用的磁碟區造成任何影響。升級過程中，會有一段短暫的時間 `docker volume`針對該插件的命令將無法執行，應用程式將無法掛載磁碟區，直到該插件重新啟動。大多數情況下，這只需幾秒鐘。
+
+
+
+[[upgrade]]
+== 升級
+
+請依照下列步驟升級 Trident for Docker 。
+
+.步驟
+. 列出現有磁碟區：
++
+[listing]
+----
+docker volume ls
+DRIVER              VOLUME NAME
+netapp:latest       my_volume
+----
+. 停用外掛程式：
++
+[listing]
+----
+docker plugin disable -f netapp:latest
+docker plugin ls
+ID                  NAME                DESCRIPTION                          ENABLED
+7067f39a5df5        netapp:latest       nDVP - NetApp Docker Volume Plugin   false
+----
+. 升級外掛程式：
++
+[listing]
+----
+docker plugin upgrade --skip-remote-check --grant-all-permissions netapp:latest netapp/trident-plugin:21.07
+----
++
+
+NOTE: Trident 的 18.01 版本取代了 nDVP。您應該直接從 `netapp/ndvp-plugin`映像升級到 `netapp/trident-plugin`映像。
+
+. 啟用外掛程式：
++
+[listing]
+----
+docker plugin enable netapp:latest
+----
+. 確認外掛程式已啟用：
++
+[listing]
+----
+docker plugin ls
+ID                  NAME                DESCRIPTION                             ENABLED
+7067f39a5df5        netapp:latest       Trident - NetApp Docker Volume Plugin   true
+----
+. 確認磁碟區可見：
++
+[listing]
+----
+docker volume ls
+DRIVER              VOLUME NAME
+netapp:latest       my_volume
+----
+
+
+
+IMPORTANT: 如果您是從舊版 Trident （ pre-20.10 ）升級到 Trident 20.10 或更高版本，可能會遇到錯誤。如需詳細資訊，請參閱 link:known-issues-docker.html["已知問題"^]。如果遇到錯誤，您應該先停用該外掛程式，然後移除該外掛程式，最後透過傳遞額外的組態參數來安裝所需的 Trident 版本： `docker plugin install netapp/trident-plugin:20.10 --alias netapp --grant-all-permissions config=config.json`
+
+
+
+[[uninstall]]
+== 解除安裝
+
+請依照下列步驟解除安裝 Trident for Docker。
+
+.步驟
+. 移除外掛程式所建立的任何磁碟區。
+. 停用外掛程式：
++
+[listing]
+----
+docker plugin disable netapp:latest
+docker plugin ls
+ID                  NAME                DESCRIPTION                          ENABLED
+7067f39a5df5        netapp:latest       nDVP - NetApp Docker Volume Plugin   false
+----
+. 移除外掛程式：
++
+[listing]
+----
+docker plugin rm netapp:latest
+----
+

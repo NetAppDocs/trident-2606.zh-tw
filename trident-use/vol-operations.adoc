@@ -1,0 +1,28 @@
+---
+sidebar: sidebar 
+permalink: trident-use/vol-operations.html 
+keywords: snapshots, volumes, csi topology, storage classes, pv, pvc, persistent volumes, persistent volume claims, backends, expand volumes, import volumes 
+summary: Trident 提供多種磁碟區管理功能。了解 Trident 為磁碟區提供的各項功能。 
+---
+= 執行 Trident Volume 操作
+:hardbreaks:
+:allow-uri-read: 
+:icons: font
+:imagesdir: ../media/
+
+
+[role="lead"]
+了解 Trident 提供用於管理磁碟區的功能。
+
+
+
+[[managing-volumes]]
+== 管理磁碟區
+
+請參考以下內容，以了解如何使用 Trident 管理磁碟區。
+
+* link:csi-topology.html["使用 CSI 拓撲"^]
+* link:vol-snapshots.html["使用快照"^]
+* link:vol-expansion.html["擴充磁碟區"^]
+* link:vol-import.html["匯入磁碟區"^]
+

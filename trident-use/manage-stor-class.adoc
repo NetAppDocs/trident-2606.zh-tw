@@ -1,0 +1,104 @@
+---
+sidebar: sidebar 
+permalink: trident-use/manage-stor-class.html 
+keywords: storage class, manage storage class, storage classes, kubernetes storage classes 
+summary: 您可以檢視現有儲存類別、設定預設儲存類別、識別儲存類別後端，以及刪除儲存類別。 
+---
+= 管理 Trident 儲存設備類別
+:hardbreaks:
+:allow-uri-read: 
+:icons: font
+:imagesdir: ../media/
+
+
+[role="lead"]
+您可以檢視現有儲存類別、設定預設儲存類別、識別儲存類別後端，以及刪除儲存類別。
+
+
+
+[[view-the-existing-storage-classes]]
+== 檢視現有的儲存類別
+
+* 若要檢視現有的 Kubernetes 儲存類別，請執行下列命令：
+
+
+[listing]
+----
+kubectl get storageclass
+----
+* 若要檢視 Kubernetes 儲存類別詳細資訊，請執行下列命令：
+
+
+[listing]
+----
+kubectl get storageclass <storage-class> -o json
+----
+* 若要檢視 Trident 的同步儲存類別，請執行下列命令：
+
+
+[listing]
+----
+tridentctl get storageclass
+----
+* 若要檢視 Trident 的同步儲存類別詳細資料、請執行下列命令：
+
+
+[listing]
+----
+tridentctl get storageclass <storage-class> -o json
+----
+
+
+[[set-a-default-storage-class]]
+== 設定預設儲存類別
+
+Kubernetes 1.6 新增了設定預設儲存類別的功能。如果使用者未在持久性磁碟區宣告（PVC）中指定儲存類別，則將使用此儲存類別來配置持久性磁碟區。
+
+* 透過在儲存類別定義中將註解  `storageclass.kubernetes.io/is-default-class` 設為 true 來定義預設儲存類別。根據規範，任何其他值或註解的缺失都將被解釋為 false。
+* 您可以使用下列命令將現有儲存類別設定為預設儲存類別：
+
+
+[listing]
+----
+kubectl patch storageclass <storage-class-name> -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
+----
+* 同樣地，您可以使用下列命令移除預設儲存類別註釋：
+
+
+[listing]
+----
+kubectl patch storageclass <storage-class-name> -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"false"}}}'
+----
+Trident 安裝程式套件中也有包含此註解的範例。
+
+
+NOTE: 叢集中一次只能存在一個預設儲存類別。Kubernetes 技術上並不會禁止存在多個預設儲存類別，但它的行為會如同根本沒有預設儲存類別一樣。
+
+
+
+[[identify-the-backend-for-a-storage-class]]
+== 識別儲存類別的後端
+
+這是一個可以使用  `tridentctl` 為 Trident 後端物件輸出的 JSON 資料來回答的問題範例。此範例使用了  `jq` 實用程式，您可能需要先安裝該程式。
+
+[listing]
+----
+tridentctl get storageclass -o json | jq  '[.items[] | {storageClass: .Config.name, backends: [.storage]|unique}]'
+----
+
+
+[[delete-a-storage-class]]
+== 刪除儲存類別
+
+若要從 Kubernetes 中刪除儲存類別，請執行以下命令：
+
+[listing]
+----
+kubectl delete storageclass <storage-class>
+----
+`<storage-class>` 應該替換成您的儲存類別。
+
+透過此儲存類別建立的任何持久性磁碟區都將保持不變，Trident 將繼續管理它們。
+
+
+NOTE: Trident 會為其建立的磁碟區強制執行空白 `fsType`。對於 iSCSI 後端、建議在 StorageClass 中強制執行 `parameters.fsType`。您應該刪除現有的 StorageClasses 並使用指定的 `parameters.fsType`重新建立它們。

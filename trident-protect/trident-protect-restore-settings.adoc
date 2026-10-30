@@ -1,0 +1,148 @@
+---
+sidebar: sidebar 
+permalink: trident-protect/trident-protect-restore-settings.html 
+keywords: trident, protect, restore, data, backup 
+summary: 您可以使用註解、命名空間設定和儲存選項來自訂 Trident Protect 還原作業。 
+---
+= 使用進階 Trident Protect 還原設定
+:hardbreaks:
+:allow-uri-read: 
+:nofooter: 
+:icons: font
+:linkattrs: 
+:imagesdir: ../media/
+
+
+[role="lead"]
+您可以利用註釋、命名空間設定和儲存選項等進階設定來自訂還原作業，以滿足您的特定需求。
+
+
+
+[[namespace-annotations-and-labels-during-restore-and-failover-operations]]
+== 還原和容錯移轉作業期間的命名空間註釋和標籤
+
+在還原和容錯移轉作業期間，目的地命名空間中的標籤和註釋會與來源命名空間中的標籤和註釋相符。來源命名空間中存在但目的地命名空間中不存在的標籤或註釋會被新增，而任何已存在的標籤或註釋則會被覆寫以符合來源命名空間中的值。僅存在於目的地命名空間中的標籤或註釋則保持不變。
+
+
+NOTE: 如果您使用 Red Hat OpenShift，請務必注意命名空間註解在 OpenShift 環境中的關鍵作用。命名空間註解可確保復原的 Pod 遵循 OpenShift 安全上下文約束（SCC）定義的相應權限和安全性配置，並能無權限問題地存取磁碟區。如需詳細資訊，請參閱 link:https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/authentication_and_authorization/managing-pod-security-policies["OpenShift 安全上下文約束文檔"^]。
+
+您可以透過在執行復原或故障轉移操作之前設定 Kubernetes 環境變數 `RESTORE_SKIP_NAMESPACE_ANNOTATIONS`，來防止目標命名空間中的特定註解被覆寫。例如：
+
+[source, console]
+----
+helm upgrade trident-protect -n trident-protect netapp-trident-protect/trident-protect \
+  --set-string restoreSkipNamespaceAnnotations="{<annotation_key_to_skip_1>,<annotation_key_to_skip_2>}" \
+  --reuse-values
+----
+
+NOTE: 執行還原或容錯移轉作業時， `restoreSkipNamespaceAnnotations` 和  `restoreSkipNamespaceLabels` 中指定的任何命名空間註釋和標籤都會從還原或容錯移轉作業中排除。請確保在初始 Helm 安裝期間配置這些設定。若要深入瞭解，請參閱 link:../trident-protect/trident-protect-customize-installation.html#configure-additional-trident-protect-helm-chart-settings["設定其他 Trident Protect Helm Chart 設定"]。
+
+如果您使用 Helm 並帶有 `--create-namespace` 標誌安裝了來源應用程式，則會對 `name` 標籤鍵進行特殊處理。在還原或容錯移轉過程中，Trident Protect 會將此標籤複製到目的地命名空間，但如果來源的值與來源命名空間相符，則會將值更新為目的地命名空間值。如果此值與來源命名空間不相符，則會將其複製到目的地命名空間而不做任何變更。
+
+
+
+[[example]]
+=== 範例
+
+以下範例展示了來源命名空間和目標命名空間，它們各自具有不同的註解和標籤。您可以查看操作前後目標命名空間的狀態，以及註解和標籤在目標命名空間中是如何組合或覆蓋的。
+
+
+
+==== 在還原或容錯移轉作業之前
+
+下表說明了復原或容錯移轉作業之前範例來源命名空間和目標命名空間的狀態：
+
+[cols="1,2a,2a"]
+|===
+| 命名空間 | 註解 | 標籤 
+
+
+| 命名空間 ns-1 （來源）  a| 
+* annotation.one/key: 「updatedvalue」
+* annotation.two/key: 「true」
+
+ a| 
+* environment=production
+* 合規性＝hipaa
+* 名稱=ns-1
+
+
+
+
+| 命名空間 ns-2 （目標）  a| 
+* annotation.one/key: 「true」
+* annotation.three/key:「false」
+
+ a| 
+* 角色=資料庫
+
+
+|===
+
+
+==== 還原作業後
+
+下表展示了復原或故障轉移作業後範例目標命名空間的狀態。一些鍵已被添加，一些鍵已被覆蓋，並且  `name` 標籤已更新以匹配目標命名空間：
+
+[cols="1,2a,2a"]
+|===
+| 命名空間 | 註解 | 標籤 
+
+
+| 命名空間 ns-2 （目標）  a| 
+* annotation.one/key: 「updatedvalue」
+* annotation.two/key: 「true」
+* annotation.three/key:「false」
+
+ a| 
+* 名稱=ns-2
+* 合規性＝hipaa
+* environment=production
+* 角色=資料庫
+
+
+|===
+
+
+[[supported-fields]]
+== 支援的欄位
+
+本節說明可用於還原作業的其他欄位。
+
+
+
+[[storage-class-mapping]]
+=== 儲存類別對應
+
+此 `spec.storageClassMapping`屬性定義了從來源應用程式中的儲存類別到目標叢集上新儲存類別的對應。在將應用程式遷移到具有不同儲存類別的叢集之間，或變更 BackupRestore 操作的儲存後端時，可以使用此屬性。
+
+* 範例： *
+
+[source, yaml]
+----
+storageClassMapping:
+  - destination: "destinationStorageClass1"
+    source: "sourceStorageClass1"
+  - destination: "destinationStorageClass2"
+    source: "sourceStorageClass2"
+----
+
+
+[[supported-annotations]]
+== 支援的註釋
+
+本節列出了系統中用於設定各種行為的支援註解。如果使用者未明確設定註解，系統將使用預設值。
+
+[cols="1,1,3,1"]
+|===
+| 註解 | 類型 | 說明 | 預設值 
+
+
+| protect.trident.netapp.io/data-mover-timeout-sec | 字串 | 資料移動器操作允許停止的最長時間（以秒為單位）。 | "300" 
+
+
+| protect.trident.netapp.io/kopia-content-cache-size-limit-mb | 字串 | Kopia 內容快取的大小上限（以 MB 為單位）。 | "1000" 
+
+
+| protect.trident.netapp.io/pvc-bind-timeout-sec | 字串 | 等待所有新建立的 PersistentVolumeClaims（PVC）達到 `Bound`階段的最長時間（以秒為單位），超過此時間操作將會失敗。適用於所有還原 CR 類型（BackupRestore、BackupInplaceRestore、SnapshotRestore、SnapshotInplaceRestore）。如果您的儲存設備後端或叢集通常需要更多時間，請使用更高的值。 | "1200"（20 分鐘） 
+|===

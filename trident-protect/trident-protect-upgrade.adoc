@@ -1,0 +1,93 @@
+---
+sidebar: sidebar 
+permalink: trident-protect/trident-protect-upgrade.html 
+keywords: trident, protect, netapp, upgrade, new, version 
+summary: 您可以將 Trident Protect 升級至最新版本，以利用新功能或錯誤修正。 
+---
+= 升級 Trident Protect
+:hardbreaks:
+:allow-uri-read: 
+:nofooter: 
+:icons: font
+:linkattrs: 
+:imagesdir: ../media/
+
+
+[role="lead"]
+您可以將 Trident Protect 升級至最新版本，以利用新功能或錯誤修正。
+
+[NOTE]
+====
+* 從 24.10 版本升級時，升級期間執行的快照可能會失敗。此失敗不會阻止未來的快照（無論是手動還是排程）被建立。如果快照在升級期間失敗，您可以手動建立新快照以確保應用程式受到保護。
++
+為避免潛在故障，您可以在升級前停用所有快照排程，並在升級後重新啟用。但是，這樣做會導致升級期間所有已排程的快照遺失。
+
+* 對於私有鏡像倉庫安裝，請確保目標版本所需的 Helm chart 和鏡像已存在於您的私有鏡像倉庫中，並驗證您的自訂 Helm 值與新 chart 版本相容。如需詳細資訊，請參閱 link:trident-protect-installation.html["從私人註冊表安裝 Trident Protect"]。
+
+
+====
+
+
+[[step-1-select-a-version]]
+== 步驟 1：選擇版本
+
+Trident Protect 版本遵循基於日期的 `YY.MM`命名規則，其中「YY」代表年份的後兩位數字，「MM」代表月份。小版本更新遵循 `YY.MM.X`規則，其中「X」代表補丁級別。您將根據要升級的版本選擇要升級到的版本。
+
+* 您可以將目前版本直接升級到與其相差不超過四個版本號的目標版本。例如，您可以直接從 24.10（或任何 24.10 的小版本）升級到 25.10。
+* 如果您要從超出四版本週期範圍的版本升級，請執行多步驟升級。使用您要升級的 link:../earlier-versions.html["早期版本"] 版本對應的升級說明，升級到符合四版本視窗期的最新版本。例如，如果您目前執行的是 24.10 版本，並且想要升級至 26.06 版本：
++
+.. 首次從 24.10 升級到 25.02。
+.. 然後從 25.02 升級到 26.06 。
+
+
+
+
+
+
+[[step-2-upgrade-trident-protect]]
+== 步驟 2：升級 Trident Protect
+
+若要升級 Trident Protect、請執行下列步驟。
+
+.步驟
+. 更新 Trident Helm 儲存庫：
++
+[source, console]
+----
+helm repo update
+----
+. 升級 Trident Protect CRD：
++
+
+NOTE: 如果您是從 25.06 之前的版本升級，則需要執行此步驟，因為 CRD 現在已包含在 Trident Protect Helm 圖表中。
+
++
+.. 執行此命令將 CRD 的管理權限從 `trident-protect-crds`切換到 `trident-protect`：
++
+[source, console]
+----
+kubectl get crd | grep protect.trident.netapp.io | awk '{print $1}' | xargs -I {} kubectl patch crd {} --type merge -p '{"metadata":{"annotations":{"meta.helm.sh/release-name": "trident-protect"}}}'
+----
+.. 執行以下指令刪除  `trident-protect-crds` chart 的 Helm secret：
++
+
+NOTE: 請勿使用 Helm 卸載 `trident-protect-crds`圖表，因為這可能會刪除您的 CRD 和任何相關資料。
+
++
+[source, console]
+----
+kubectl delete secret -n trident-protect -l name=trident-protect-crds,owner=helm
+----
+
+
+. 升級 Trident Protect：
++
+[source, console]
+----
+helm upgrade trident-protect netapp-trident-protect/trident-protect --version 100.2606.0 --namespace trident-protect
+----
++
+
+NOTE: 您可以透過在升級命令中新增 `--set logLevel=debug`來配置升級期間的日誌等級。預設日誌等級為 `warn`。建議啟用偵錯日誌以進行故障排除，因為它有助於 NetApp 支援人員診斷問題，而無需更改日誌等級或重現問題。
+
+

@@ -1,0 +1,405 @@
+---
+sidebar: sidebar 
+permalink: trident-reco/kerberos-inflight-encryption.html 
+keywords: Trident, backend, storage, encryption, kerberos 
+summary: 您可以設定加密來保護 Trident 與您的儲存後端之間的流量。 
+---
+= Trident Kerberos 傳輸中加密
+:hardbreaks:
+:allow-uri-read: 
+:icons: font
+:imagesdir: ../media/
+
+
+[role="lead"]
+使用 Kerberos 傳輸中加密，您可以對託管叢集和儲存後端之間的流量啟用加密，從而提高資料存取安全性。
+
+Trident 支援以 ONTAP 作為儲存後端的 Kerberos 加密：
+
+* *內部部署 ONTAP* - Trident 支援透過 NFSv3 和 NFSv4 連線，從 Red Hat OpenShift 和上游 Kubernetes 叢集到內部部署 ONTAP 磁碟區的 Kerberos 加密。
+
+
+您可以建立、刪除、調整大小、建立快照、複製、唯讀複製和匯入使用 NFS 加密的磁碟區。
+
+
+
+[[configure-in-flight-kerberos-encryption-with-on-premise-ontap-volumes]]
+== 使用內部部署 ONTAP 磁碟區設定傳輸中 Kerberos 加密
+
+您可以為託管叢集和本機 ONTAP 儲存後端之間的儲存流量啟用 Kerberos 加密。
+
+
+NOTE: 對於使用本機 ONTAP 儲存後端的 NFS 流量，僅支援使用  `ontap-nas` 儲存驅動程式進行 Kerberos 加密。
+
+.開始之前
+* 請確保您可以使用  `tridentctl` 公用程式。
+* 請確保您擁有 ONTAP 儲存後端的管理員存取權限。
+* 請確保您知道要從 ONTAP 儲存後端共用的磁碟區名稱。
+* 請確保您已設定 ONTAP 儲存虛擬機器以支援 NFS 磁碟區的 Kerberos 加密。請參閱 https://docs.netapp.com/us-en/ontap/nfs-config/create-kerberos-config-task.html["在資料 LIF 上啟用 Kerberos"^]以取得指示。
+* 請確保所有與 Kerberos 加密一起使用的 NFSv4 磁碟區都已正確設定。請參閱 NetApp NFSv4 域配置部分（第 13 頁） https://www.netapp.com/media/16398-tr-3580.pdf["NetApp NFSv4 增強功能與最佳實務指南"^]。
+
+
+
+
+[[add-or-modify-ontap-export-policies]]
+=== 新增或修改 ONTAP 匯出原則
+
+您需要為現有的 ONTAP 匯出策略新增規則，或建立新的匯出策略，以支援對 ONTAP 儲存 VM 根磁碟區以及與上游 Kubernetes 叢集共用的任何 ONTAP 磁碟區進行 Kerberos 加密。您新增的匯出策略規則或建立的新匯出策略需要支援以下存取協定和存取權限：
+
+.存取通訊協定
+使用 NFS、NFSv3 和 NFSv4 存取協定設定匯出原則。
+
+.存取詳細資料
+您可以根據磁碟區的需求、配置三種不同版本的 Kerberos 加密之一：
+
+* *Kerberos 5* - （驗證和加密）
+* *Kerberos 5i* -（驗證和加密，具有身分保護功能）
+* *Kerberos 5p* -（驗證和加密，提供身分和隱私保護）
+
+
+使用適當的存取權限設定 ONTAP 匯出原則規則。例如，如果叢集將使用 Kerberos 5i 和 Kerberos 5p 加密混合掛載 NFS 磁碟區，請使用下列存取設定：
+
+|===
+| 類型 | 唯讀存取 | 讀取 / 寫入存取權 | 超級使用者存取 
+
+
+| UNIX | 已啟用 | 已啟用 | 已啟用 
+
+
+| Kerberos 5i | 已啟用 | 已啟用 | 已啟用 
+
+
+| Kerberos 5p | 已啟用 | 已啟用 | 已啟用 
+|===
+有關如何建立 ONTAP 匯出原則和匯出原則規則的資訊，請參閱下列文件：
+
+* https://docs.netapp.com/us-en/ontap/nfs-config/create-export-policy-task.html["建立匯出原則"^]
+* https://docs.netapp.com/us-en/ontap/nfs-config/add-rule-export-policy-task.html["將規則新增至匯出原則"^]
+
+
+
+
+[[create-a-storage-backend]]
+=== 建立儲存後端
+
+您可以建立包含 Kerberos 加密功能的 Trident 儲存後端組態。
+
+.關於此任務
+建立配置 Kerberos 加密的儲存後端設定檔時，可以使用  `spec.nfsMountOptions` 參數指定三種不同版本的 Kerberos 加密之一：
+
+* `spec.nfsMountOptions: sec=krb5` （驗證與加密）
+* `spec.nfsMountOptions: sec=krb5i`（驗證與加密及身分保護）
+* `spec.nfsMountOptions: sec=krb5p`（驗證與加密，具備身分與隱私保護）
+
+
+只能指定一個 Kerberos 加密等級。如果在參數清單中指定了多個 Kerberos 加密等級，則僅使用第一個選項。
+
+.步驟
+. 在託管叢集上，使用以下範例建立儲存後端組態檔。將方括號 <> 中的值替換為您環境中的資訊：
++
+[source, yaml]
+----
+apiVersion: v1
+kind: Secret
+metadata:
+  name: backend-ontap-nas-secret
+type: Opaque
+stringData:
+  clientID: <CLIENT_ID>
+  clientSecret: <CLIENT_SECRET>
+---
+apiVersion: trident.netapp.io/v1
+kind: TridentBackendConfig
+metadata:
+  name: backend-ontap-nas
+spec:
+  version: 1
+  storageDriverName: "ontap-nas"
+  managementLIF: <STORAGE_VM_MGMT_LIF_IP_ADDRESS>
+  dataLIF: <PROTOCOL_LIF_FQDN_OR_IP_ADDRESS>
+  svm: <STORAGE_VM_NAME>
+  username: <STORAGE_VM_USERNAME_CREDENTIAL>
+  password: <STORAGE_VM_PASSWORD_CREDENTIAL>
+  nasType: nfs
+  nfsMountOptions: ["sec=krb5i"] #can be krb5, krb5i, or krb5p
+  qtreesPerFlexvol:
+  credentials:
+    name: backend-ontap-nas-secret
+----
+. 使用上一步建立的組態檔建立後端：
++
+[source, console]
+----
+tridentctl create backend -f <backend-configuration-file>
+----
++
+如果後端建立失敗，則表示後端配置存在問題。您可以執行以下命令查看日誌以確定原因：
+
++
+[source, console]
+----
+tridentctl logs
+----
++
+在您識別並修正組態檔的問題後、您可以再次執行 create 命令。
+
+
+
+
+
+[[create-a-storage-class]]
+=== 建立儲存類別
+
+您可以建立儲存類別來配置具有 Kerberos 加密的磁碟區。
+
+.關於此任務
+建立儲存類別物件時，可以使用  `mountOptions` 參數指定三種不同版本的 Kerberos 加密之一：
+
+* `mountOptions: sec=krb5` （驗證與加密）
+* `mountOptions: sec=krb5i`（驗證與加密及身分保護）
+* `mountOptions: sec=krb5p`（驗證與加密，具備身分與隱私保護）
+
+
+只能指定一個 Kerberos 加密等級。如果在參數清單中指定了多個 Kerberos 加密等級，則僅使用第一個選項。如果在儲存後端組態中指定的加密等級與在儲存類別物件中指定的加密等級不同，則以儲存類別物件為準。
+
+.步驟
+. 建立一個 StorageClass Kubernetes 物件，請參考以下範例：
++
+[source, yaml]
+----
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: ontap-nas-sc
+provisioner: csi.trident.netapp.io
+mountOptions:
+  - sec=krb5i #can be krb5, krb5i, or krb5p
+parameters:
+  backendType: ontap-nas
+  storagePools: ontapnas_pool
+  trident.netapp.io/nasType: nfs
+allowVolumeExpansion: true
+
+----
+. 建立儲存類別：
++
+[source, console]
+----
+kubectl create -f sample-input/storage-class-ontap-nas-sc.yaml
+----
+. 請確保已建立儲存類別：
++
+[source, console]
+----
+kubectl get sc ontap-nas-sc
+----
++
+您應該會看到類似以下內容的輸出：
+
++
+[listing]
+----
+NAME         PROVISIONER             AGE
+ontap-nas-sc    csi.trident.netapp.io   15h
+----
+
+
+
+
+[[provision-volumes]]
+=== 配置磁碟區
+
+建立儲存後端和儲存類別後，即可配置磁碟區。如需相關指示，請參閱 https://docs.netapp.com/us-en/trident/trident-use/vol-provision.html["配置磁碟區"^]。
+
+
+
+[[configure-in-flight-kerberos-encryption-with-azure-netapp-files-volumes]]
+== 使用 Azure NetApp Files 磁碟區設定傳輸中 Kerberos 加密
+
+您可以為託管叢集與單一 Azure NetApp Files 儲存後端或 Azure NetApp Files 儲存後端虛擬池之間的儲存流量啟用 Kerberos 加密。
+
+.開始之前
+* 請確保已在受管理的 Red Hat OpenShift 叢集上啟用 Trident。
+* 請確保您可以使用  `tridentctl` 公用程式。
+* 請確保您已為 Kerberos 加密準備好 Azure NetApp Files 儲存後端，請注意需求並遵循 https://learn.microsoft.com/en-us/azure/azure-netapp-files/configure-kerberos-encryption["Azure NetApp Files 文件"^]中的說明。
+* 請確保所有與 Kerberos 加密一起使用的 NFSv4 磁碟區都已正確設定。請參閱 NetApp NFSv4 域配置部分（第 13 頁） https://www.netapp.com/media/16398-tr-3580.pdf["NetApp NFSv4 增強功能與最佳實務指南"^]。
+
+
+
+
+[[create-a-storage-backend]]
+=== 建立儲存後端
+
+您可以建立包含 Kerberos 加密功能的 Azure NetApp Files 儲存後端組態。
+
+.關於此任務
+建立配置 Kerberos 加密的儲存後端組態檔時，您可以將其定義為套用於下列兩個層級之一：
+
+* 使用 `spec.kerberos`欄位的 *storage backend level*
+* 使用 `spec.storage.kerberos`欄位的*虛擬資源池層級*
+
+
+在虛擬資源池層級定義組態時，會使用儲存類別中的標籤來選取資源池。
+
+無論在哪個級別、您都可以指定三種不同版本的 Kerberos 加密之一：
+
+* `kerberos: sec=krb5` （驗證與加密）
+* `kerberos: sec=krb5i`（驗證與加密及身分保護）
+* `kerberos: sec=krb5p`（驗證與加密，具備身分與隱私保護）
+
+
+.步驟
+. 在託管叢集上，根據您需要定義儲存後端的位置（儲存後端等級或虛擬資源池等級），使用下列其中一個範例建立儲存後端組態檔。將方括號 <> 中的值替換為您環境中的資訊：
++
+[role="tabbed-block"]
+====
+.儲存後端層級範例
+--
+[source, yaml]
+----
+apiVersion: v1
+kind: Secret
+metadata:
+  name: backend-tbc-secret
+type: Opaque
+stringData:
+  clientID: <CLIENT_ID>
+  clientSecret: <CLIENT_SECRET>
+
+---
+apiVersion: trident.netapp.io/v1
+kind: TridentBackendConfig
+metadata:
+  name: backend-tbc
+spec:
+  version: 1
+  storageDriverName: azure-netapp-files
+  subscriptionID: <SUBSCRIPTION_ID>
+  tenantID: <TENANT_ID>
+  location: <AZURE_REGION_LOCATION>
+  serviceLevel: Standard
+  networkFeatures: Standard
+  capacityPools: <CAPACITY_POOL>
+  resourceGroups: <RESOURCE_GROUP>
+  netappAccounts: <NETAPP_ACCOUNT>
+  virtualNetwork: <VIRTUAL_NETWORK>
+  subnet: <SUBNET>
+  nasType: nfs
+  kerberos: sec=krb5i #can be krb5, krb5i, or krb5p
+  credentials:
+    name: backend-tbc-secret
+----
+--
+.虛擬資源池層級範例
+--
+[source, yaml]
+----
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: backend-tbc-secret
+type: Opaque
+stringData:
+  clientID: <CLIENT_ID>
+  clientSecret: <CLIENT_SECRET>
+
+---
+apiVersion: trident.netapp.io/v1
+kind: TridentBackendConfig
+metadata:
+  name: backend-tbc
+spec:
+  version: 1
+  storageDriverName: azure-netapp-files
+  subscriptionID: <SUBSCRIPTION_ID>
+  tenantID: <TENANT_ID>
+  location: <AZURE_REGION_LOCATION>
+  serviceLevel: Standard
+  networkFeatures: Standard
+  capacityPools: <CAPACITY_POOL>
+  resourceGroups: <RESOURCE_GROUP>
+  netappAccounts: <NETAPP_ACCOUNT>
+  virtualNetwork: <VIRTUAL_NETWORK>
+  subnet: <SUBNET>
+  nasType: nfs
+  storage:
+    - labels:
+        type: encryption
+      kerberos: sec=krb5i #can be krb5, krb5i, or krb5p
+  credentials:
+    name: backend-tbc-secret
+
+----
+--
+====
+. 使用上一步建立的組態檔建立後端：
++
+[source, console]
+----
+tridentctl create backend -f <backend-configuration-file>
+----
++
+如果後端建立失敗，則表示後端配置存在問題。您可以執行以下命令查看日誌以確定原因：
+
++
+[source, console]
+----
+tridentctl logs
+----
++
+在您識別並修正組態檔的問題後、您可以再次執行 create 命令。
+
+
+
+
+
+[[create-a-storage-class]]
+=== 建立儲存類別
+
+您可以建立儲存類別來配置具有 Kerberos 加密的磁碟區。
+
+.步驟
+. 建立一個 StorageClass Kubernetes 物件，請參考以下範例：
++
+[source, yaml]
+----
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: sc-nfs
+provisioner: csi.trident.netapp.io
+parameters:
+  backendType: azure-netapp-files
+  trident.netapp.io/nasType: nfs
+  selector: type=encryption
+----
+. 建立儲存類別：
++
+[source, console]
+----
+kubectl create -f sample-input/storage-class-sc-nfs.yaml
+----
+. 請確保已建立儲存類別：
++
+[source, console]
+----
+kubectl get sc -sc-nfs
+----
++
+您應該會看到類似以下內容的輸出：
+
++
+[listing]
+----
+NAME         PROVISIONER             AGE
+sc-nfs       csi.trident.netapp.io   15h
+----
+
+
+
+
+[[provision-volumes]]
+=== 配置磁碟區
+
+建立儲存後端和儲存類別後，即可配置磁碟區。如需相關指示，請參閱 https://docs.netapp.com/us-en/trident/trident-use/vol-provision.html["配置磁碟區"^]。

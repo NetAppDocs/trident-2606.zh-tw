@@ -1,0 +1,386 @@
+---
+sidebar: sidebar 
+permalink: trident-protect/trident-protect-use-execution-hooks.html 
+keywords: trident, protect, execution hooks 
+summary: 您可以使用 Trident Protect 為應用程式建立自訂執行鉤子。您需要擁有 Owner、Admin 或 Member 權限才能建立執行鉤子。 
+---
+= 管理 Trident Protect 執行掛鉤
+:hardbreaks:
+:allow-uri-read: 
+:nofooter: 
+:icons: font
+:linkattrs: 
+:imagesdir: ../media/
+
+
+[role="lead"]
+執行鉤子是一種自訂操作，您可以將其配置為與託管應用程式的資料保護操作一起運行。例如，如果您有一個資料庫應用程式，則可以使用執行鉤子在建立快照之前暫停所有資料庫事務，並在快照完成後恢復事務。這可以確保應用程式快照的一致性。
+
+
+
+[[types-of-execution-hooks]]
+== 執行掛鉤的類型
+
+Trident Protect 支援以下幾種執行鉤子類型，取決於它們的執行時機：
+
+* 快照前
+* 快照後
+* 備份前
+* 備份後
+* 還原後
+* 故障轉移後
+
+
+
+
+[[order-of-execution]]
+=== 執行順序
+
+執行資料保護作業時，執行掛鉤事件會依照以下順序發生：
+
+. 任何適用的自訂作業前執行掛勾都會在適當的容器上執行。您可以建立並運行任意數量的自訂預操作鉤子，但這些鉤子在操作之前的執行順序既無法保證也無法配置。
+. 如果適用，檔案系統會凍結。link:trident-protect-requirements.html#protecting-data-with-kubevirt-vms["深入瞭解如何使用 Trident Protect 設定檔案系統凍結"]。
+. 執行資料保護作業。
+. 如果適用，則解凍已凍結的檔案系統。
+. 任何適用的自訂後操作執行鉤子都會在相應的容器上運行。您可以建立並運行任意數量的自訂後操作鉤子，但這些鉤子在操作後的執行順序既無法保證也無法配置。
+
+
+如果您建立多個相同類型的執行鉤子（例如，快照前鉤子），則這些鉤子的執行順序無法保證。但是，不同類型鉤子的執行順序是有保證的。例如，以下是包含所有不同類型鉤子的組態的執行順序：
+
+. 已執行快照前鉤子
+. 執行快照後掛鉤
+. 執行備份前掛鉤
+. 執行備份後掛鉤
+
+
+
+NOTE: 前述順序範例僅適用於執行不使用現有快照的備份時。
+
+
+NOTE: 在生產環境中啟用執行鉤子腳本之前，請務必先對其進行測試。您可以使用 'kubectl exec' 指令方便地測試這些腳本。在生產環境中啟用執行鉤子後，請測試產生的快照和備份，以確保它們的一致性。您可以將應用程式複製到臨時命名空間，還原快照或備份，然後測試應用程式。
+
+
+NOTE: 如果快照前執行鉤子新增、變更或刪除 Kubernetes 資源，則這些變更將包含在快照或備份以及任何後續還原作業中。
+
+
+
+[[important-notes-about-custom-execution-hooks]]
+== 關於自訂執行掛鉤的重要說明
+
+在規劃應用程式的執行鉤子時,請考慮以下幾點。
+
+* 執行掛鉤必須使用指令碼來執行動作。許多執行掛鉤可以參照同一個指令碼。
+* Trident Protect 要求執行鉤子使用的腳本以可執行 shell 腳本的格式編寫。
+* 指令碼大小限制為 96KB。
+* Trident Protect 使用執行掛鉤設定和任何相符條件來判斷哪些掛鉤適用於快照、備份或還原作業。
+
+
+
+NOTE: 由於執行鉤子通常會降低甚至完全停用其所針對應用程式的功能，因此您應該始終盡量縮短自訂執行鉤子的執行時間。如果您啟動了一個帶有關聯執行鉤子的備份或快照操作，但隨後取消了該操作，只要備份或快照操作已經開始，這些鉤子仍然可以執行。這意味著備份後執行鉤子中使用的邏輯不能假定備份已經完成。
+
+
+
+[[execution-hook-filters]]
+== 執行掛鉤篩選器
+
+當您新增或編輯應用程式的執行鉤子時，您可以為該執行鉤子添加過濾器，以管理鉤子將匹配哪些容器。篩選器適用於在所有 Container 上使用相同 Container 映像，但可能將每個映像用於不同用途的應用程式（例如 Elasticsearch）。篩選器可讓您建立執行掛鉤在部分（但不一定全部）相同 Container 上執行的情境。如果為單一執行掛鉤建立多個篩選器，它們將透過邏輯 AND 運算子進行組合。每個執行掛鉤最多可以有 10 個作用中篩選器。
+
+新增至執行鉤子的每個篩選器都使用正規表示式來比對叢集中的 Container。當鉤子匹配到容器時，它將在該容器上運行其關聯的腳本。篩選器的正規表示式使用正規表示式 2 (RE2) 語法，該語法不支援建立從符合清單中排除 Container 的篩選器。有關 Trident Protect 支援的執行鉤子過濾器正規表示式語法的更多資訊，請參閱 https://github.com/google/re2/wiki/Syntax["Regular Expression 2 (RE2) 語法支援"^]。
+
+
+NOTE: 如果在還原或複製作業之後執行的執行鉤子中新增命名空間篩選器，且還原或複製來源和目的地位於不同的命名空間中，則命名空間篩選器僅套用於目的地命名空間。
+
+
+
+[[execution-hook-examples]]
+== 執行掛鉤範例
+
+造訪 https://github.com/NetApp/Verda["NetApp Verda GitHub 專案"]下載適用於 Apache Cassandra 和 Elasticsearch 等熱門應用程式的真實執行鉤子。您也可以查看範例，並從中取得建置自訂執行鉤子的想法。
+
+
+NOTE: Verda 儲存庫中的腳本按原樣提供，並未獲得 NetApp 的官方支援。NetApp 支援僅涵蓋 Trident Protect 中的執行掛鉤框架。
+
+
+
+[[create-an-execution-hook]]
+== 建立執行掛鉤
+
+您可以使用 Trident Protect 為應用程式建立自訂執行鉤子。您需要擁有 Owner、Admin 或 Member 權限才能建立執行鉤子。
+
+[role="tabbed-block"]
+====
+.使用 CR
+--
+.步驟
+. 建立自訂資源（CR）檔案並將其命名為 `trident-protect-hook.yaml`。
+. 設定以下屬性以符合您的 Trident Protect 環境和叢集組態：
++
+** *metadata.name*：（_必填_）此自訂資源的名稱；請為您的環境選擇一個唯一且有意義的名稱。
+** *spec.applicationRef*：（_必填_）要執行執行鉤子的應用程式的 Kubernetes 名稱。
+** *spec.stage*：（_必需_）一個字串，指示執行鉤子應在操作的哪個階段運行。可選值：
++
+*** 預先
+*** 發佈
+
+
+** *spec.action*：（_必要_）一個字串，指示執行鉤子將執行的操作，假設符合任何指定的執行鉤子篩選器。可選值：
++
+*** 快照
+*** 備份
+*** 還原
+*** 容錯移轉
+
+
+** *spec.enabled*：（_可選_）指示此執行鉤子是否啟用或停用。如果未指定，則預設值為 true。
+** *spec.hookSource*：（_必填_）包含 base64 編碼的 hook 腳本的字串。
+** *spec.timeout*：（_可選_）一個數字，定義執行鉤子允許運行的最長時間（以分鐘為單位）。最小值為 1 分鐘，如果未指定，則預設值為 25 分鐘。
+** *spec.arguments*：（_可選_）您可以為執行掛鉤指定的 YAML 引數清單。
+** *spec.matchingCriteria*：（_可選_）條件鍵值對的可選清單，每個鍵值對構成一個執行鉤子過濾器。每個執行鉤子最多可以新增 10 個過濾器。
+** *spec.matchingCriteria.type*：（_可選_）用於識別執行鉤子過濾器類型的字串。可選值：
++
+*** ContainerImage
+*** ContainerName
+*** PodName
+*** PodLabel
+*** NamespaceName
+
+
+** *spec.matchingCriteria.value*：（_可選_）識別執行鉤子過濾器值的字串或正規表示式。
++
+YAML 範例：
+
++
+[source, yaml]
+----
+apiVersion: protect.trident.netapp.io/v1
+kind: ExecHook
+metadata:
+  name: example-hook-cr
+  namespace: my-app-namespace
+  annotations:
+    astra.netapp.io/astra-control-hook-source-id: /account/test/hookSource/id
+spec:
+  applicationRef: my-app-name
+  stage: Pre
+  action: Snapshot
+  enabled: true
+  hookSource: IyEvYmluL2Jhc2gKZWNobyAiZXhhbXBsZSBzY3JpcHQiCg==
+  timeout: 10
+  arguments:
+    - FirstExampleArg
+    - SecondExampleArg
+  matchingCriteria:
+    - type: containerName
+      value: mysql
+    - type: containerImage
+      value: bitnami/mysql
+    - type: podName
+      value: mysql
+    - type: namespaceName
+      value: mysql-a
+    - type: podLabel
+      value: app.kubernetes.io/component=primary
+    - type: podLabel
+      value: helm.sh/chart=mysql-10.1.0
+    - type: podLabel
+      value: deployment-type=production
+----
+
+
+. 在用正確的值填入 CR 檔案後，套用 CR：
++
+[source, console]
+----
+kubectl apply -f trident-protect-hook.yaml
+----
+
+
+--
+.使用 CLI
+--
+.步驟
+. 建立執行鉤子，並將括號中的值替換為您環境中的資訊。例如：
++
+[source, console]
+----
+tridentctl-protect create exechook <my_exec_hook_name> --action <action_type> --app <app_to_use_hook> --stage <pre_or_post_stage> --source-file <script-file> -n <application_namespace>
+----
+
+
+--
+====
+
+
+[[manually-run-an-execution-hook]]
+== 手動執行執行掛鉤
+
+您可以手動執行 execution hook 以進行測試，或者在失敗後需要手動重新執行 hook。您需要擁有 Owner、Admin 或 Member 權限才能手動執行 execution hook。
+
+手動執行執行掛鉤包含兩個基本步驟：
+
+. 建立資源備份，該備份會收集資源並建立它們的備份，從而確定鉤子函數的運作位置
+. 針對備份執行執行掛鉤
+
+
+.步驟 1：建立資源備份
+[%collapsible]
+====
+[role="tabbed-block"]
+=====
+.使用 CR
+--
+.步驟
+. 建立自訂資源（CR）檔案並將其命名為 `trident-protect-resource-backup.yaml`。
+. 設定以下屬性以符合您的 Trident Protect 環境和叢集組態：
++
+** *metadata.name*：（_必填_）此自訂資源的名稱；請為您的環境選擇一個唯一且有意義的名稱。
+** *spec.applicationRef*：（_必填_）要為其建立資源備份的應用程式的 Kubernetes 名稱。
+** *spec.appVaultRef*：（_必填_）儲存備份內容的 AppVault 名稱。
+** *spec.appArchivePath*：AppVault 內儲存備份內容的路徑。您可以使用以下命令來尋找此路徑：
++
+[source, console]
+----
+kubectl get backups <BACKUP_NAME> -n my-app-namespace -o jsonpath='{.status.appArchivePath}'
+----
++
+YAML 範例：
+
++
+[source, yaml]
+----
+---
+apiVersion: protect.trident.netapp.io/v1
+kind: ResourceBackup
+metadata:
+  name: example-resource-backup
+spec:
+  applicationRef: my-app-name
+  appVaultRef: my-appvault-name
+  appArchivePath: example-resource-backup
+----
+
+
+. 在用正確的值填入 CR 檔案後，套用 CR：
++
+[source, console]
+----
+kubectl apply -f trident-protect-resource-backup.yaml
+----
+
+
+--
+.使用 CLI
+--
+.步驟
+. 建立備份，並將括號中的值替換為您環境中的資訊。例如：
++
+[source, console]
+----
+tridentctl protect create resourcebackup <my_backup_name> --app <my_app_name> --appvault <my_appvault_name> -n <my_app_namespace> --app-archive-path <app_archive_path>
+----
+. 檢視備份狀態。您可以重複使用此範例命令，直到作業完成：
++
+[source, console]
+----
+tridentctl protect get resourcebackup -n <my_app_namespace> <my_backup_name>
+----
+. 確認備份是否成功：
++
+[source, console]
+----
+kubectl describe resourcebackup <my_backup_name>
+----
+
+
+--
+=====
+====
+.步驟 2：執行 execution hook
+[%collapsible]
+====
+[role="tabbed-block"]
+=====
+.使用 CR
+--
+.步驟
+. 建立自訂資源（CR）檔案並將其命名為 `trident-protect-hook-run.yaml`。
+. 設定以下屬性以符合您的 Trident Protect 環境和叢集組態：
++
+** *metadata.name*：（_必填_）此自訂資源的名稱；請為您的環境選擇一個唯一且有意義的名稱。
+** *spec.applicationRef*：（_必填_）確保此值與您在步驟 1 中建立的 ResourceBackup CR 中的應用程式名稱相符。
+** *spec.appVaultRef*：（_必填_）請確保此值與您在步驟 1 中建立的 ResourceBackup CR 的 appVaultRef 相符。
+** *spec.appArchivePath*：請確保此值與您在步驟 1 中建立的 ResourceBackup CR 內的 appArchivePath 相符。
++
+[source, console]
+----
+kubectl get backups <BACKUP_NAME> -n my-app-namespace -o jsonpath='{.status.appArchivePath}'
+----
+** *spec.action*：（_必要_）一個字串，指示執行鉤子將執行的操作，假設符合任何指定的執行鉤子篩選器。可選值：
++
+*** 快照
+*** 備份
+*** 還原
+*** 容錯移轉
+
+
+** *spec.stage*：（_必需_）一個字串，指示執行鉤子應在操作的哪個階段運行。此鉤子運行不會在任何其他階段運行鉤子。可選值：
++
+*** 預先
+*** 發佈
++
+YAML 範例：
+
++
+[source, yaml]
+----
+---
+apiVersion: protect.trident.netapp.io/v1
+kind: ExecHooksRun
+metadata:
+  name: example-hook-run
+spec:
+  applicationRef: my-app-name
+  appVaultRef: my-appvault-name
+  appArchivePath: example-resource-backup
+  stage: Post
+  action: Failover
+----
+
+
+
+
+. 在用正確的值填入 CR 檔案後，套用 CR：
++
+[source, console]
+----
+kubectl apply -f trident-protect-hook-run.yaml
+----
+
+
+--
+.使用 CLI
+--
+.步驟
+. 建立手動執行掛鉤執行請求：
++
+[source, console]
+----
+tridentctl protect create exechooksrun <my_exec_hook_run_name> -n <my_app_namespace> --action snapshot --stage <pre_or_post> --app <my_app_name> --appvault <my_appvault_name> --path <my_backup_name>
+----
+. 檢查執行掛鉤執行的狀態。您可以重複執行此命令，直到操作完成：
++
+[source, console]
+----
+tridentctl protect get exechooksrun -n <my_app_namespace> <my_exec_hook_run_name>
+----
+. 描述 exechooksrun 物件以查看最終詳細資訊和狀態：
++
+[source, console]
+----
+kubectl -n <my_app_namespace> describe exechooksrun <my_exec_hook_run_name>
+----
+
+
+--
+=====
+====

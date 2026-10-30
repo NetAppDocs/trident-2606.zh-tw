@@ -1,0 +1,305 @@
+---
+sidebar: sidebar 
+permalink: trident-use/csi-topology.html 
+keywords: volumes, csi topology, storage classes, backends, kubernetes 
+summary: Trident 可以利用 CSI Topology 功能，選擇性地建立磁碟區並將其附加到 Kubernetes 叢集中的節點。 
+---
+= 使用 CSI 拓撲
+:hardbreaks:
+:allow-uri-read: 
+:icons: font
+:imagesdir: ../media/
+
+
+[role="lead"]
+Trident 可以利用 https://kubernetes-csi.github.io/docs/topology.html["CSI Topology 功能"^]選擇性地建立磁碟區並將其附加到 Kubernetes 叢集中的節點。
+
+
+
+[[overview]]
+== 概況
+
+使用 CSI Topology 功能，可以根據區域和可用區將磁碟區的存取權限限制在部分節點上。如今，雲端供應商允許 Kubernetes 管理員建立基於可用區的節點。節點可以位於同一區域內的不同可用區，也可以跨越多個區域。為了方便在多可用區架構中為工作負載配置磁碟區，Trident 使用 CSI Topology。
+
+
+TIP: 深入瞭解 CSI Topology 功能 https://kubernetes.io/blog/2018/10/11/topology-aware-volume-provisioning-in-kubernetes/["這裡"^]。
+
+Kubernetes 提供兩種獨特的磁碟區繫結模式：
+
+* 將 `VolumeBindingMode`設為 `Immediate`時、Trident 會在不感知拓撲的情況下建立磁碟區。磁碟區繫結和動態資源配置會在建立 PVC 時處理。這是預設 `VolumeBindingMode`、適用於不強制執行拓撲限制的叢集。持續磁碟區的建立不會依賴要求 Pod 的排程需求。
+* 將 `VolumeBindingMode`設為 `WaitForFirstConsumer`時、系統會延遲建立 PVC 的持續磁碟區並將其繫結、直到排程並建立使用該 PVC 的 Pod 為止。如此一來、建立的磁碟區就能符合拓撲需求所強制執行的排程限制。
+
+
+
+NOTE:  `WaitForFirstConsumer` 綁定模式不需要拓樸標籤。它可以獨立於 CSI 拓樸功能使用。
+
+.您需要準備的項目
+若要使用 CSI Topology，您需要下列項目：
+
+* 執行 link:../trident-get-started/requirements.html["支援的 Kubernetes 版本"] 的 Kubernetes 叢集
++
+[listing]
+----
+kubectl version
+Client Version: version.Info{Major:"1", Minor:"19", GitVersion:"v1.19.3", GitCommit:"1e11e4a2108024935ecfcb2912226cedeafd99df", GitTreeState:"clean", BuildDate:"2020-10-14T12:50:19Z", GoVersion:"go1.15.2", Compiler:"gc", Platform:"linux/amd64"}
+Server Version: version.Info{Major:"1", Minor:"19", GitVersion:"v1.19.3", GitCommit:"1e11e4a2108024935ecfcb2912226cedeafd99df", GitTreeState:"clean", BuildDate:"2020-10-14T12:41:49Z", GoVersion:"go1.15.2", Compiler:"gc", Platform:"linux/amd64"}
+----
+* 叢集中的節點應該帶有用於引入拓撲感知的標籤(`topology.kubernetes.io/region`和 `topology.kubernetes.io/zone`）。這些標籤*應該在安裝 Trident 之前就存在於叢集中的節點上*，以便 Trident 能夠感知拓撲。
++
+[listing]
+----
+kubectl get nodes -o=jsonpath='{range .items[*]}[{.metadata.name}, {.metadata.labels}]{"\n"}{end}' | grep --color "topology.kubernetes.io"
+[node1, {"beta.kubernetes.io/arch":"amd64","beta.kubernetes.io/os":"linux","kubernetes.io/arch":"amd64","kubernetes.io/hostname":"node1","kubernetes.io/os":"linux","node-role.kubernetes.io/master":"","topology.kubernetes.io/region":"us-east1","topology.kubernetes.io/zone":"us-east1-a"}]
+[node2, {"beta.kubernetes.io/arch":"amd64","beta.kubernetes.io/os":"linux","kubernetes.io/arch":"amd64","kubernetes.io/hostname":"node2","kubernetes.io/os":"linux","node-role.kubernetes.io/worker":"","topology.kubernetes.io/region":"us-east1","topology.kubernetes.io/zone":"us-east1-b"}]
+[node3, {"beta.kubernetes.io/arch":"amd64","beta.kubernetes.io/os":"linux","kubernetes.io/arch":"amd64","kubernetes.io/hostname":"node3","kubernetes.io/os":"linux","node-role.kubernetes.io/worker":"","topology.kubernetes.io/region":"us-east1","topology.kubernetes.io/zone":"us-east1-c"}]
+----
+
+
+
+
+[[step-1-create-a-topology-aware-backend]]
+== 步驟 1：建立拓樸感知後端
+
+Trident 儲存後端可設計為根據可用區選擇性地配置磁碟區。每個後端都可以包含一個可選的  `supportedTopologies` 資料區塊，用於指定支援的區域和可用區清單。對於使用此類後端的 StorageClasses，僅當調度到受支援區域/可用區的應用程式請求時，才會建立相應的磁碟區。
+
+以下是後端定義範例：
+
+[role="tabbed-block"]
+====
+.YAML
+--
+[source, yaml]
+----
+---
+version: 1
+storageDriverName: ontap-san
+backendName: san-backend-us-east1
+managementLIF: 192.168.27.5
+svm: iscsi_svm
+username: admin
+password: password
+supportedTopologies:
+  - topology.kubernetes.io/region: us-east1
+    topology.kubernetes.io/zone: us-east1-a
+  - topology.kubernetes.io/region: us-east1
+    topology.kubernetes.io/zone: us-east1-b
+----
+--
+.JSON
+--
+[source, json]
+----
+{
+  "version": 1,
+  "storageDriverName": "ontap-san",
+  "backendName": "san-backend-us-east1",
+  "managementLIF": "192.168.27.5",
+  "svm": "iscsi_svm",
+  "username": "admin",
+  "password": "password",
+  "supportedTopologies": [
+    {
+      "topology.kubernetes.io/region": "us-east1",
+      "topology.kubernetes.io/zone": "us-east1-a"
+    },
+    {
+      "topology.kubernetes.io/region": "us-east1",
+      "topology.kubernetes.io/zone": "us-east1-b"
+    }
+  ]
+}
+----
+--
+====
+
+NOTE: `supportedTopologies` 用於為每個後端提供區域和可用區清單。這些區域和可用區代表可以在 StorageClass 中提供的允許值清單。對於包含後端提供的區域和可用區子集的 StorageClasses，Trident 會在後端建立一個磁碟區。
+
+您也可以按儲存池定義 `supportedTopologies`。請參閱以下範例：
+
+[source, yaml]
+----
+---
+version: 1
+storageDriverName: ontap-nas
+backendName: nas-backend-us-central1
+managementLIF: 172.16.238.5
+svm: nfs_svm
+username: admin
+password: password
+supportedTopologies:
+  - topology.kubernetes.io/region: us-central1
+    topology.kubernetes.io/zone: us-central1-a
+  - topology.kubernetes.io/region: us-central1
+    topology.kubernetes.io/zone: us-central1-b
+storage:
+  - labels:
+      workload: production
+    supportedTopologies:
+      - topology.kubernetes.io/region: us-central1
+        topology.kubernetes.io/zone: us-central1-a
+  - labels:
+      workload: dev
+    supportedTopologies:
+      - topology.kubernetes.io/region: us-central1
+        topology.kubernetes.io/zone: us-central1-b
+
+----
+在此範例中、 `region` 和 `zone` 標籤代表儲存資源池的位置。 `topology.kubernetes.io/region` 和 `topology.kubernetes.io/zone` 則指定可從何處使用儲存資源池。
+
+
+
+[[step-2-define-storageclasses-that-are-topology-aware]]
+== 步驟 2：定義可感知拓撲的 StorageClasses
+
+根據提供給叢集中節點的拓樸標籤、StorageClasses 可定義為包含拓樸資訊。這將決定哪些儲存資源池可作為 PVC 要求的候選對象、以及哪些節點子集可以使用 Trident 所配置的磁碟區。
+
+請參閱以下範例：
+
+[source, yaml]
+----
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: netapp-san-us-east1
+provisioner: csi.trident.netapp.io
+volumeBindingMode: WaitForFirstConsumer
+allowedTopologies:
+  - matchLabelExpressions:
+    - key: topology.kubernetes.io/zone
+      values:
+        - us-east1-a
+        - us-east1-b
+    - key: topology.kubernetes.io/region
+      values:
+        - us-east1
+parameters:
+  fsType: ext4
+----
+在上述提供的 StorageClass 定義中， `volumeBindingMode` 被設定為  `WaitForFirstConsumer`。使用此 StorageClass 請求的 PVC 只有在 Pod 中被引用後才會生效。而且， `allowedTopologies` 提供要使用的 zone 和 region。 `netapp-san-us-east1` StorageClass 會在上述定義的  `san-backend-us-east1` 後端上建立 PVC。
+
+
+
+[[step-3-create-and-use-a-pvc]]
+== 步驟 3：建立並使用 PVC
+
+建立 StorageClass 並映射到後端後，您現在可以建立 PVC。
+
+請看下面的例子 `spec`：
+
+[source, yaml]
+----
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata: null
+name: pvc-san
+spec: null
+accessModes:
+  - ReadWriteOnce
+resources:
+  requests:
+    storage: 300Mi
+storageClassName: netapp-san-us-east1
+----
+使用此資訊清單建立 PVC 將產生下列結果：
+
+[listing]
+----
+kubectl create -f pvc.yaml
+persistentvolumeclaim/pvc-san created
+kubectl get pvc
+NAME      STATUS    VOLUME   CAPACITY   ACCESS MODES   STORAGECLASS          AGE
+pvc-san   Pending                                      netapp-san-us-east1   2s
+kubectl describe pvc
+Name:          pvc-san
+Namespace:     default
+StorageClass:  netapp-san-us-east1
+Status:        Pending
+Volume:
+Labels:        <none>
+Annotations:   <none>
+Finalizers:    [kubernetes.io/pvc-protection]
+Capacity:
+Access Modes:
+VolumeMode:    Filesystem
+Mounted By:    <none>
+Events:
+  Type    Reason                Age   From                         Message
+  ----    ------                ----  ----                         -------
+  Normal  WaitForFirstConsumer  6s    persistentvolume-controller  waiting for first consumer to be created before binding
+----
+若要讓 Trident 建立磁碟區並將其繫結至 PVC，請在 Pod 中使用 PVC。請參閱以下範例：
+
+[source, yaml]
+----
+apiVersion: v1
+kind: Pod
+metadata:
+  name: app-pod-1
+spec:
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: topology.kubernetes.io/region
+            operator: In
+            values:
+            - us-east1
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 1
+        preference:
+          matchExpressions:
+          - key: topology.kubernetes.io/zone
+            operator: In
+            values:
+            - us-east1-a
+            - us-east1-b
+  securityContext:
+    runAsUser: 1000
+    runAsGroup: 3000
+    fsGroup: 2000
+  volumes:
+  - name: vol1
+    persistentVolumeClaim:
+      claimName: pvc-san
+  containers:
+  - name: sec-ctx-demo
+    image: busybox
+    command: [ "sh", "-c", "sleep 1h" ]
+    volumeMounts:
+    - name: vol1
+      mountPath: /data/demo
+    securityContext:
+      allowPrivilegeEscalation: false
+----
+這個 podSpec 指示 Kubernetes 將 pod 排程到  `us-east1` 區域中存在的節點上，並從  `us-east1-a` 或  `us-east1-b` 區域中存在的任何節點中進行選擇。
+
+請參閱下列輸出：
+
+[listing]
+----
+kubectl get pods -o wide
+NAME        READY   STATUS    RESTARTS   AGE   IP               NODE              NOMINATED NODE   READINESS GATES
+app-pod-1   1/1     Running   0          19s   192.168.25.131   node2             <none>           <none>
+kubectl get pvc -o wide
+NAME      STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS          AGE   VOLUMEMODE
+pvc-san   Bound    pvc-ecb1e1a0-840c-463b-8b65-b3d033e2e62b   300Mi      RWO            netapp-san-us-east1   48s   Filesystem
+----
+
+
+[[update-backends-to-include-supportedtopologies]]
+== 更新後端以包含  `supportedTopologies`
+
+可以更新現有後端，使其包含 `supportedTopologies`清單，使用 `tridentctl backend update`。這不會影響已配置的磁碟區，並且僅用於後續的 PVC。
+
+
+
+[[find-more-information]]
+== 尋找更多資訊
+
+* https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/["管理容器資源"^]
+* https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#nodeselector["nodeSelector"^]
+* https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#affinity-and-anti-affinity["親和性與反親和性"^]
+* https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/["污點與容忍度"^]
+

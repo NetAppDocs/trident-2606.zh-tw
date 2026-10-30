@@ -1,0 +1,29 @@
+---
+sidebar: sidebar 
+permalink: trident-concepts/provisioning.html 
+keywords: provisioning, Trident 
+summary: 在 Trident 中進行資源配置分為兩個主要階段。第一階段是將儲存類別與一組適當的後端儲存資源池關聯起來，這是資源配置之前必要的準備工作。第二階段包含磁碟區的建立，需要從與待處理磁碟區的儲存類別關聯的儲存資源池中選擇一個。 
+---
+= Trident Volume 配置流程
+:hardbreaks:
+:allow-uri-read: 
+:icons: font
+:imagesdir: ../media/
+
+
+[role="lead"]
+在 Trident 中進行資源配置分為兩個主要階段。第一階段是將儲存類別與一組適當的後端儲存資源池關聯起來，這是資源配置之前必要的準備工作。第二階段包含磁碟區的建立，需要從與待處理磁碟區的儲存類別關聯的儲存資源池中選擇一個。
+
+
+
+[[storage-class-association]]
+== 儲存類別關聯
+
+將後端儲存池與儲存類別關聯起來，取決於儲存類別請求的屬性以及其  `storagePools`、 `additionalStoragePools` 和  `excludeStoragePools` 清單。建立儲存類別時、Trident 會將每個後端提供的屬性和儲存池與儲存類別請求的屬性和儲存池進行比較。如果某個儲存池的屬性和名稱與所有要求的屬性和儲存池名稱都匹配、Trident 會將該儲存池新增至該儲存類別的適用儲存池集合中。此外、Trident 也會將  `additionalStoragePools` 清單中列出的所有儲存池新增至該集合中，即使它們的屬性不符合儲存類別請求的全部或任何屬性。您應該使用  `excludeStoragePools` 清單來覆寫和移除儲存類別所使用的儲存池。每次新增後端時、Trident 都會執行類似的過程，檢查其儲存池是否符合現有儲存類別的儲存池，並移除任何標記為已排除的儲存池。
+
+
+
+[[volume-creation]]
+== Volume 建立
+
+Trident 會利用儲存類別和儲存池之間的關聯來決定磁碟區的配置位置。在建立磁碟區時，Trident 首先會取得該磁碟區所屬儲存類別的儲存池集合，如果您為磁碟區指定了協議，Trident 會移除那些無法提供所需協定的儲存池（例如，NetApp HCI/SolidFire 後端無法提供基於檔案的磁碟區，而 ONTAP NAS 後端無法提供基於區塊的磁碟區）。Trident 會將結果集合的順序隨機化，以確保磁碟區的均勻分佈，然後遍歷該集合，依序嘗試在每個儲存池上配置磁碟區。如果在一個儲存池上配置成功，則傳回成功，並記錄過程中遇到的任何失敗。Trident 僅當無法在所有可用於所要求的儲存類別和協定的儲存池上設定磁碟區時才會傳回失敗。

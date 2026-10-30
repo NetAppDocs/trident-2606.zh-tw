@@ -1,0 +1,31 @@
+---
+sidebar: sidebar 
+permalink: trident-concepts/vol-access-groups.html 
+keywords: volume access groups, element, solidfire, chap, Trident, hci, netapp hci, storage system, access volumes, 
+summary: 深入瞭解 Trident 如何使用磁碟區存取群組。 
+---
+= Trident Volume 存取群組管理
+:hardbreaks:
+:allow-uri-read: 
+:icons: font
+:imagesdir: ../media/
+
+
+[role="lead"]
+深入瞭解 Trident 如何使用 https://docs.netapp.com/us-en/element-software/concepts/concept_solidfire_concepts_volume_access_groups.html["Volume 存取群組"^]。
+
+
+NOTE: 如果您使用的是 CHAP，請忽略此部分。建議使用 CHAP 以簡化管理並避免下文所述的擴展限制。此外，如果您在 CSI 模式下使用 Trident，也可以忽略此部分。Trident 在作為增強型 CSI 佈建程式安裝時使用 CHAP。
+
+
+
+[[learn-about-volume-access-groups]]
+== 了解 Volume Access Group
+
+Trident 可以使用磁碟區存取群組來控制對其配置的磁碟區的存取。如果 CHAP 被停用，它會尋找名為 `trident`的存取群組，除非您在設定中指定一個或多個存取群組 ID。
+
+Trident 會將新磁碟區與已設定的存取群組建立關聯，但它本身並不會建立或管理存取群組。存取群組必須在將儲存後端新增至 Trident 之前就已存在，並且需要包含 Kubernetes 叢集中所有可能掛載該後端所配置磁碟區的節點的 iSCSI IQN。在大多數安裝中，這包括叢集中的每個工作節點。
+
+對於節點數超過 64 個的 Kubernetes 叢集，您應該使用多個存取群組。每個存取群組最多可以包含 64 個 IQN，每個磁碟區可以屬於四個存取群組。配置最多四個存取群組後，規模不超過 256 個節點的叢集中的任何節點都可以存取任何磁碟區。有關磁碟區存取群組的最新限制，請參閱 https://docs.netapp.com/us-en/element-software/concepts/concept_solidfire_concepts_volume_access_groups.html["這裡"^]。
+
+如果您要將組態從使用預設  `trident` 存取群組的組態修改為同時使用其他存取群組的組態，請在清單中包含  `trident` 存取群組的 ID。

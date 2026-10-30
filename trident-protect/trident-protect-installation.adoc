@@ -1,0 +1,152 @@
+---
+sidebar: sidebar 
+permalink: trident-protect/trident-protect-installation.html 
+keywords: install, trident, protect, requirements, registry 
+summary: 如果您的環境符合要求，您可以依照下列步驟安裝 Trident Protect。 
+---
+= 安裝並設定 Trident Protect
+:hardbreaks:
+:allow-uri-read: 
+:nofooter: 
+:icons: font
+:linkattrs: 
+:imagesdir: ../media/
+
+
+[role="lead"]
+如果您的環境符合 Trident Protect 的要求，您可以依照下列步驟在叢集上安裝 Trident Protect。您可以從 NetApp 取得 Trident Protect，也可以從您自己的私人登錄安裝。如果您的叢集無法存取網際網路，從私人登錄安裝會很有幫助。
+
+
+
+[[install-trident-protect]]
+== 安裝 Trident Protect
+
+[role="tabbed-block"]
+====
+.從 NetApp 安裝 Trident Protect
+--
+.步驟
+. 新增 Trident Helm 儲存庫：
++
+[source, console]
+----
+helm repo add netapp-trident-protect https://netapp.github.io/trident-protect-helm-chart
+----
+. 使用 Helm 安裝 Trident Protect。將 `<name-of-cluster>`替換為叢集名稱，該名稱將分配給叢集並用於識別叢集的備份和快照：
++
+[source, console]
+----
+helm install trident-protect netapp-trident-protect/trident-protect --set clusterName=<name-of-cluster> --version 100.2606.0 --create-namespace --namespace trident-protect
+----
+. （選用）若要啟用偵錯日誌記錄（建議用於疑難排解），請使用：
++
+[source, console]
+----
+helm install trident-protect netapp-trident-protect/trident-protect --set clusterName=<name-of-cluster> --set logLevel=debug --version 100.2606.0 --create-namespace --namespace trident-protect
+----
++
+偵錯日誌有助於 NetApp 支援人員在無需更改日誌等級或重現問題的情況下排查問題。
+
+
+
+--
+.從私人註冊表安裝 Trident Protect
+--
+如果您的 Kubernetes 叢集無法存取網際網路，您可以從私人映像登錄安裝 Trident Protect。在這些範例中，請將方括號中的值替換為您環境中的資訊：
+
+.步驟
+. 將以下映像拉取到本機、更新標籤、然後將其推送到您的私有登錄：
++
+[source, console]
+----
+docker.io/netapp/controller:26.06.0
+docker.io/netapp/restic:26.06.0
+docker.io/netapp/kopia:26.06.0
+docker.io/netapp/kopiablockrestore:26.06.0
+docker.io/netapp/trident-autosupport:26.06.0
+docker.io/netapp/exechook:26.06.0
+docker.io/netapp/resourcebackup:26.06.0
+docker.io/netapp/resourcerestore:26.06.0
+docker.io/netapp/resourcedelete:26.06.0
+docker.io/netapp/trident-protect-utils:v1.0.0
+----
++
+例如：
+
++
+[source, console]
+----
+docker pull docker.io/netapp/controller:26.06.0
+----
++
+[source, console]
+----
+docker tag docker.io/netapp/controller:26.06.0 <private-registry-url>/controller:26.06.0
+----
++
+[source, console]
+----
+docker push <private-registry-url>/controller:26.06.0
+----
++
+
+NOTE: 若要取得 Helm chart，請先在可存取互聯網的機器上使用 `helm pull trident-protect --version 100.2606.0 --repo https://netapp.github.io/trident-protect-helm-chart`下載 Helm chart，然後將產生的 `trident-protect-100.2606.0.tgz`檔案複製到您的離線環境中，並在最後一步中使用 `helm install trident-protect ./trident-protect-100.2606.0.tgz`而不是儲存庫引用進行安裝。
+
+. 建立 Trident Protect 系統命名空間：
++
+[source, console]
+----
+kubectl create ns trident-protect
+----
+. 登入登錄：
++
+[source, console]
+----
+helm registry login <private-registry-url> -u <account-id> -p <api-token>
+----
+. 建立用於私有登錄驗證的 pull secret ：
++
+[source, console]
+----
+kubectl create secret docker-registry regcred --docker-username=<registry-username> --docker-password=<api-token> -n trident-protect --docker-server=<private-registry-url>
+----
+. 新增 Trident Helm 儲存庫：
++
+[source, console]
+----
+helm repo add netapp-trident-protect https://netapp.github.io/trident-protect-helm-chart
+----
+. 建立一個名為 `protectValues.yaml`的檔案。確保該檔案包含以下 Trident Protect 設定：
++
+[source, yaml]
+----
+---
+imageRegistry: <private-registry-url>
+imagePullSecrets:
+  - name: regcred
+----
++
+
+NOTE:  `imageRegistry` 和  `imagePullSecrets` 值適用於所有組件鏡像，包括  `resourcebackup` 和  `resourcerestore`。如果您將鏡像推送到登錄中的特定儲存庫路徑（例如， `example.com:443/my-repo`），請在登錄欄位中包含完整路徑。這將確保所有鏡像都從  `<private-registry-url>/<image-name>:<tag>` 拉取。
+
+. 使用 Helm 安裝 Trident Protect。將 `<name_of_cluster>`替換為叢集名稱，該名稱將分配給叢集並用於識別叢集的備份和快照：
++
+[source, console]
+----
+helm install trident-protect netapp-trident-protect/trident-protect --set clusterName=<name_of_cluster> --version 100.2606.0 --create-namespace --namespace trident-protect -f protectValues.yaml
+----
+. （選用）若要啟用偵錯日誌記錄（建議用於疑難排解），請使用：
++
+[source, console]
+----
+helm install trident-protect netapp-trident-protect/trident-protect --set clusterName=<name-of-cluster> --set logLevel=debug --version 100.2606.0 --create-namespace --namespace trident-protect -f protectValues.yaml
+----
++
+偵錯日誌有助於 NetApp 支援人員在無需更改日誌等級或重現問題的情況下排查問題。
+
+
+
+--
+====
+
+NOTE: 有關 Helm chart 配置的其他選項，包括 AutoSupport 設定和命名空間過濾，請參閱 link:trident-protect-customize-installation.html#configure-additional-trident-protect-helm-chart-settings["自訂 Trident Protect 安裝"]。

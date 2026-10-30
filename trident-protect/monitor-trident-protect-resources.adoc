@@ -1,0 +1,228 @@
+---
+permalink: trident-protect/monitor-trident-protect-resources.html 
+sidebar: sidebar 
+keywords: manage, authentication, rbac 
+summary: 您可以使用 kube-state-metrics 和 Prometheus 監控 Trident Protect 資源的狀態。這可以為您提供有關部署、節點和 Pod 的健康狀況資訊。 
+---
+= 監控 Trident Protect 資源
+:allow-uri-read: 
+:icons: font
+:imagesdir: ../media/
+
+
+[role="lead"]
+您可以使用 kube-state-metrics、Prometheus 和 Alertmanager 這些開源工具來監控由 Trident Protect 保護的資源健康狀況。
+
+kube-state-metrics 服務會從 Kubernetes API 通訊產生指標。將其與 Trident Protect 結合使用，可公開有關環境中資源狀態的實用資訊。
+
+Prometheus 是一個工具包，可以接收由 kube-state-metrics 產生的數據，並將其呈現為易於閱讀的這些物件資訊。kube-state-metrics 和 Prometheus 結合使用，為你提供一種方式來監控你使用 Trident Protect 管理的資源的健康狀態和狀態。
+
+Alertmanager 是一項服務，它可以接收 Prometheus 等工具發送的警報，並將它們路由到您配置的目標位置。
+
+[NOTE]
+====
+這些步驟中包含的組態和指南僅為範例；您需要根據自己的環境進行自訂。有關具體說明和支援，請參閱以下官方文件：
+
+* https://github.com/kubernetes/kube-state-metrics/tree/main["kube-state-metrics 說明文件"^]
+* https://prometheus.io/docs/introduction/overview/["Prometheus 說明文件"^]
+* https://github.com/prometheus/alertmanager["Alertmanager 文件"^]
+
+
+====
+
+
+[[step-1-install-the-monitoring-tools]]
+== 步驟 1：安裝監控工具
+
+要在 Trident Protect 中啟用資源監控，您需要安裝和設定 kube-state-metrics、Prometheus 和 Alertmanager。
+
+
+
+[[install-kube-state-metrics]]
+=== 安裝 kube-state-metrics
+
+您可以使用 Helm 安裝 kube-state-metrics。
+
+.步驟
+. 新增 kube-state-metrics Helm chart。例如：
++
+[source, console]
+----
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+----
+. 將 Prometheus ServiceMonitor CRD 應用於叢集：
++
+[source, console]
+----
+kubectl apply -f https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/main/example/prometheus-operator-crd/monitoring.coreos.com_servicemonitors.yaml
+----
+. 為 Helm chart 建立一個設定檔（例如， `metrics-config.yaml`）。您可以自訂以下範例設定以符合您的環境：
++
+.metrics-config.yaml：kube-state-metrics Helm chart 配置
+[source, yaml]
+----
+---
+extraArgs:
+  # Collect only custom metrics
+  - --custom-resource-state-only=true
+
+customResourceState:
+  enabled: true
+  config:
+    kind: CustomResourceStateMetrics
+    spec:
+      resources:
+      - groupVersionKind:
+          group: protect.trident.netapp.io
+          kind: "Backup"
+          version: "v1"
+        labelsFromPath:
+          backup_uid: [metadata, uid]
+          backup_name: [metadata, name]
+          creation_time: [metadata, creationTimestamp]
+        metrics:
+        - name: backup_info
+          help: "Exposes details about the Backup state"
+          each:
+            type: Info
+            info:
+              labelsFromPath:
+                appVaultReference: ["spec", "appVaultRef"]
+                appReference: ["spec", "applicationRef"]
+rbac:
+  extraRules:
+  - apiGroups: ["protect.trident.netapp.io"]
+    resources: ["backups"]
+    verbs: ["list", "watch"]
+
+# Collect metrics from all namespaces
+namespaces: ""
+
+# Ensure that the metrics are collected by Prometheus
+prometheus:
+  monitor:
+    enabled: true
+----
+. 透過部署 Helm chart 來安裝 kube-state-metrics。例如：
++
+[source, console]
+----
+helm install custom-resource -f metrics-config.yaml prometheus-community/kube-state-metrics --version 5.21.0
+----
+. 請依照 https://github.com/kubernetes/kube-state-metrics/blob/main/docs/metrics/extend/customresourcestate-metrics.md#custom-resource-state-metrics["kube-state-metrics 自訂資源文件"^]中的說明配置 kube-state-metrics，以產生 Trident Protect 使用的自訂資源的指標。
+
+
+
+
+[[install-prometheus]]
+=== 安裝 Prometheus
+
+您可以按照 https://prometheus.io/docs/prometheus/latest/installation/["Prometheus 說明文件"^]中的說明安裝 Prometheus。
+
+
+
+[[install-alertmanager]]
+=== 安裝 Alertmanager
+
+您可以按照 https://github.com/prometheus/alertmanager?tab=readme-ov-file#install["Alertmanager 文件"^]中的說明安裝 Alertmanager。
+
+
+
+[[step-2-configure-the-monitoring-tools-to-work-together]]
+== 步驟 2：設定監控工具以協同運作
+
+安裝監控工具後，您需要設定它們以使其協同工作。
+
+.步驟
+. 將 kube-state-metrics 與 Prometheus 整合。編輯 Prometheus 配置文件 (`prometheus.yaml`）並新增 kube-state-metrics 服務資訊。例如：
++
+.prometheus.yaml：kube-state-metrics 服務與 Prometheus 的整合
+[source, yaml]
+----
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: trident-protect
+data:
+  prometheus.yaml: |
+    global:
+      scrape_interval: 15s
+    scrape_configs:
+      - job_name: 'kube-state-metrics'
+        static_configs:
+          - targets: ['kube-state-metrics.trident-protect.svc:8080']
+----
+. 設定 Prometheus 將警示路由至 Alertmanager。編輯 Prometheus 組態檔 (`prometheus.yaml`，並新增以下區段：
++
+.prometheus.yaml：將警報傳送至 Alertmanager
+[source, yaml]
+----
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager.trident-protect.svc:9093
+----
+
+
+.結果
+Prometheus 現在可以從 kube-state-metrics 收集指標，並向 Alertmanager 發送警報。現在您可以設定觸發警報的條件以及警報的發送位置。
+
+
+
+[[step-3-configure-alerts-and-alert-destinations]]
+== 步驟 3：設定警示和警示目的地
+
+配置好工具協同工作後，您需要配置哪些類型的資訊會觸發警示，以及警示應該發送到哪裡。
+
+
+
+[[alert-example-backup-failure]]
+=== 警示範例：備份失敗
+
+以下範例定義了一個關鍵警報，當備份自訂資源的狀態設定為 `Error`且持續時間達到 5 秒或更長時，將觸發該警報。您可以根據自己的環境自訂此範例，並將此 YAML 程式碼片段新增至您的 `prometheus.yaml`組態檔：
+
+.rules.yaml：定義備份失敗的 Prometheus 警報
+[source, yaml]
+----
+rules.yaml: |
+  groups:
+    - name: fail-backup
+        rules:
+          - alert: BackupFailed
+            expr: kube_customresource_backup_info{status="Error"}
+            for: 5s
+            labels:
+              severity: critical
+            annotations:
+              summary: "Backup failed"
+              description: "A backup has failed."
+----
+
+
+[[configure-alertmanager-to-send-alerts-to-other-channels]]
+=== 配置 Alertmanager 以將警示傳送至其他管道
+
+您可以設定 Alertmanager，使其會向其他管道（例如電子郵件、PagerDuty、Microsoft Teams 或其他通知服務）發送通知，只需在  `alertmanager.yaml` 文件中指定相應的配置即可。
+
+以下範例配置 Alertmanager 向 Slack 頻道發送通知。若要根據您的環境自訂此範例，請將  `api_url` 鍵值替換為您環境中使用的 Slack webhook URL：
+
+.alertmanager.yaml ：向 Slack 頻道發送警報
+[source, yaml]
+----
+data:
+  alertmanager.yaml: |
+    global:
+      resolve_timeout: 5m
+    route:
+      receiver: 'slack-notifications'
+    receivers:
+      - name: 'slack-notifications'
+        slack_configs:
+          - api_url: '<your-slack-webhook-url>'
+            channel: '#failed-backups-channel'
+            send_resolved: false
+----

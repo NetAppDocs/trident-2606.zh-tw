@@ -1,0 +1,50 @@
+= 
+:allow-uri-read: 
+
+
+. （可選）如果您只需要選擇應用程式的某些資源進行恢復，請新增篩選條件，以包含或排除帶有特定標籤的資源：
++
+
+NOTE: Trident Protect 會自動選擇一些資源，因為它們與您選擇的資源有關聯。例如，如果您選擇了持續性磁碟區宣告資源，且該資源關聯了一個 Pod，則 Trident Protect 也會還原該關聯 Pod。
+
++
+** *resourceFilter.resourceSelectionCriteria*：（篩選必需）使用 `Include`或 `Exclude`來包含或排除在 resourceMatchers 中定義的資源。新增以下 resourceMatchers 參數以定義要包含或排除的資源：
++
+*** *resourceFilter.resourceMatchers*：resourceMatcher 物件的陣列。如果在此陣列中定義多個元素，它們之間將按 OR 運算匹配，每個元素內的欄位（group、kind、version）之間將按 AND 運算匹配。
++
+**** *resourceMatchers[].group*：（_可選_）要篩選的資源群組。
+**** *resourceMatchers[].kind*：（_可選_）要篩選的資源類型。
+**** *resourceMatchers[].version*：（_可選_）要篩選的資源版本。
+**** *resourceMatchers[].names*：（_可選_）要過濾的資源的 Kubernetes metadata.name 欄位中的名稱。
+**** *resourceMatchers[].namespaces*：（_可選_）要篩選的資源的 Kubernetes metadata.name 欄位中的命名空間。
+**** *resourceMatchers[].labelSelectors*：（_可選_）資源在 Kubernetes metadata.name 欄位中定義的標籤選擇器字串 https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#label-selectors["Kubernetes 說明文件"^]。例如： `"trident.netapp.io/os=linux"`。
++
+例如：
+
++
+[source, yaml]
+----
+spec:
+  resourceFilter:
+    resourceSelectionCriteria: "Include"
+    resourceMatchers:
+      - group: my-resource-group-1
+        kind: my-resource-kind-1
+        version: my-resource-version-1
+        names: ["my-resource-names"]
+        namespaces: ["my-resource-namespaces"]
+        labelSelectors: ["trident.netapp.io/os=linux"]
+      - group: my-resource-group-2
+        kind: my-resource-kind-2
+        version: my-resource-version-2
+        names: ["my-resource-names"]
+        namespaces: ["my-resource-namespaces"]
+        labelSelectors: ["trident.netapp.io/os=linux"]
+----
+
+
+
+
+
+
+

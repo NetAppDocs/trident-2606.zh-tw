@@ -1,0 +1,76 @@
+---
+sidebar: sidebar 
+permalink: trident-reco/security-reco.html 
+keywords: security, chap, trident, namespace, nve, nae, encryption, volume encryption, aggregate encryption 
+summary: 請按照此處列出的建議、確保您的 Trident 安裝安全可靠。 
+---
+= Trident 安全性建議
+:hardbreaks:
+:allow-uri-read: 
+:icons: font
+:imagesdir: ../media/
+
+
+[role="lead"]
+請按照此處列出的建議、確保您的 Trident 安裝安全可靠。
+
+
+
+[[run-trident-in-its-own-namespace]]
+== 在其自己的命名空間中執行 Trident
+
+防止應用程式、應用程式管理員、使用者和管理應用程式存取 Trident 物件定義或 Pod 非常重要，以確保可靠的儲存並封鎖潛在的惡意活動。
+
+為了將其他應用程式和使用者與 Trident 分開，請務必將 Trident 安裝在其專屬的 Kubernetes 命名空間中(`trident`。將 Trident 置於其專屬的命名空間可確保只有 Kubernetes 管理人員才能存取 Trident Pod 以及儲存在命名空間 CRD 物件中的成品（例如後端和 CHAP 密碼，如果適用）。您應該確保僅允許管理員存取 Trident 命名空間，從而存取  `tridentctl` 應用程式。
+
+
+
+[[use-chap-authentication-with-ontap-san-backends]]
+== 使用 CHAP 驗證與 ONTAP SAN 後端
+
+Trident 支援基於 CHAP 的 ONTAP SAN 工作負載驗證（使用 `ontap-san`和 `ontap-san-economy`驅動程式）。NetApp 建議 Trident 在主機和儲存後端之間使用雙向 CHAP 進行身份驗證。
+
+對於使用 SAN 儲存驅動程式的 ONTAP 後端， Trident 可以透過 `tridentctl`設定雙向 CHAP 並管理 CHAP 使用者名稱和金鑰。請參閱link:../trident-use/ontap-san-prep.html["準備使用 ONTAP SAN 驅動程式配置後端"^]以了解 Trident 在 ONTAP 後端上的 CHAP 設定方式。
+
+
+
+[[use-chap-authentication-with-netapp-hci-and-solidfire-backends]]
+== 在 NetApp HCI 和 SolidFire 後端使用 CHAP 驗證
+
+NetApp 建議部署雙向 CHAP，以確保主機與 NetApp HCI 及 SolidFire 後端之間的驗證。Trident 會使用一個包含每個租戶兩組 CHAP 密碼的 secret 物件。安裝 Trident 時，它會管理 CHAP 機密並將其儲存在對應 PV 的  `tridentvolume` CR 物件中。當你建立 PV 時，Trident 會使用 CHAP 機密來啟動 iSCSI 連線，並透過 CHAP 與 NetApp HCI 及 SolidFire 系統進行通訊。
+
+
+NOTE: 由 Trident 建立的磁碟區不會與任何磁碟區存取群組關聯。
+
+
+
+[[use-trident-with-nve-and-nae]]
+== 將 Trident 與 NVE 和 NAE 結合使用
+
+NetApp ONTAP 提供靜態資料加密，以保護磁碟被盜、退回或重新利用時的敏感資料。如需詳細資料，請參閱 link:https://docs.netapp.com/us-en/ontap/encryption-at-rest/configure-netapp-volume-encryption-concept.html["設定 NetApp Volume Encryption 總覽"^]。
+
+* 如果後端啟用了 NAE，則在 Trident 中配置的任何磁碟區都會啟用 NAE。
++
+** 您可以設定 NVE 加密標誌以  `""` 建立啟用 NAE 的磁碟區。
+
+
+* 如果後端未啟用 NAE，則在 Trident 中配置的任何磁碟區都會啟用 NVE，除非在後端組態中將 NVE 加密旗標設為 `false`（預設值）。
+
+
+[NOTE]
+====
+在啟用 NAE 的後端上使用 Trident 建立的磁碟區必須使用 NVE 或 NAE 加密。
+
+* 您可以在 Trident 後端設定中將 NVE 加密標誌設定為 `true`，以覆蓋 NAE 加密並按磁碟區使用特定的加密金鑰。
+* 在啟用 NAE 的後端上將 NVE 加密標誌設為 `false`會建立一個啟用 NAE 的磁碟區。您無法將 NVE 加密標誌設為 `false`來停用 NAE 加密。
+
+
+====
+* 您可以透過明確地將 NVE 加密標誌設為  `true` 來在 Trident 中手動建立 NVE 磁碟區。
+
+
+如需後端組態選項的詳細資訊，請參閱：
+
+* link:../trident-use/ontap-san-examples.html["ONTAP SAN 組態選項"]
+* link:../trident-use/ontap-nas-examples.html["ONTAP NAS 組態選項"]
+

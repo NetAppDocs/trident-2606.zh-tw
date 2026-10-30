@@ -1,0 +1,71 @@
+---
+sidebar: sidebar 
+permalink: trident-reference/rest-api.html 
+keywords: rest api, get, post, json, object, backends 
+summary: 如果您希望與 Trident 的 REST API 進行交互，可以直接使用 REST 端點。 
+---
+= Trident REST API
+:hardbreaks:
+:allow-uri-read: 
+:icons: font
+:imagesdir: ../media/
+
+
+[role="lead"]
+雖然 link:../trident-managing-k8s/tridentctl.html["Trident 指令和選項"] 是與 Trident REST API 互動的最簡單方法，但如果您願意，也可以直接使用 REST 端點。
+
+
+
+[[when-to-use-the-rest-api]]
+== 何時使用 REST API
+
+REST API 適用於在非 Kubernetes 部署中使用 Trident 作為獨立二進位檔的進階安裝。
+
+為了提高安全性，Trident `REST API` 在 Pod 內運行時預設僅限於本機。若要變更此行為，您需要在 Trident 的 Pod 設定中設定 Trident 的 `-address` 參數。
+
+
+
+[[using-rest-api]]
+== 使用 REST API
+
+若要查看這些 API 的呼叫範例，請傳遞 debug (`-d` 標誌。如需詳細資訊，請參閱 link:../trident-managing-k8s/tridentctl.html["使用 tridentctl 管理 Trident"]。
+
+API 的運作方式如下：
+
+
+
+[[get]]
+=== 取得
+
+`GET <trident-address>/trident/v1/<object-type>`:: 列出該類型的所有物件。
+`GET <trident-address>/trident/v1/<object-type>/<object-name>`:: 取得指定物件的詳細資訊。
+
+
+
+
+[[post]]
+=== POST
+
+`POST <trident-address>/trident/v1/<object-type>`:: 建立指定類型的物件。
++
+--
+* 需要為要建立的物件提供 JSON 組態。有關每種物件類型的規格，請參閱 link:../trident-managing-k8s/tridentctl.html["使用 tridentctl 管理 Trident"]。
+* 如果物件已存在，則行為會有所不同：後端會更新現有物件，而所有其他物件類型都會使操作失敗。
+
+
+--
+
+
+
+
+[[delete]]
+=== 刪除
+
+`DELETE <trident-address>/trident/v1/<object-type>/<object-name>`:: 刪除指定的資源。
++
+--
+
+NOTE: 與後端或儲存類別關聯的磁碟區將繼續存在；這些磁碟區必須單獨刪除。如需詳細資訊，請參閱 link:../trident-managing-k8s/tridentctl.html["使用 tridentctl 管理 Trident"]。
+
+--
+

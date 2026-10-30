@@ -1,0 +1,215 @@
+---
+sidebar: sidebar 
+permalink: trident-install/kubernetes-deploy-tridentctl.html 
+keywords: deploy, Trident, methods, tridentctl, windows 
+summary: '您可以使用 `tridentctl`安裝 Trident。此程序適用於 Trident 所需的容器映像儲存在私有登錄中或未儲存的安裝。' 
+---
+= 使用 tridentctl 安裝 Trident
+:hardbreaks:
+:allow-uri-read: 
+:icons: font
+:imagesdir: ../media/
+
+
+[role="lead"]
+您可以使用 `tridentctl`安裝 Trident。此程序適用於 Trident 所需的容器映像儲存在私有登錄中或未儲存的安裝。若要自訂 `tridentctl`部署，請參閱link:kubernetes-customize-deploy-tridentctl.html["自訂 tridentctl 部署"]。
+
+
+
+[[critical-information-about-trident10]]
+== 關於 Trident10 的關鍵資訊
+
+*您必須閱讀以下關於 Trident 的重要資訊。*
+
+.<strong>關於 Trident 的重要資訊</strong>
+[%collapsible%open]
+====
+* Trident 現在支援 Kubernetes 1.27。請先升級 Trident，再升級 Kubernetes。
+* Trident 嚴格強制要求在 SAN 環境中使用多路徑配置，建議在 multipath.conf 檔案中設定  `find_multipaths: no` 值。
++
+使用非多路徑配置或在 multipath.conf 檔案中使用 `find_multipaths: yes`或 `find_multipaths: smart`值會導致掛載失敗。Trident 自 21.07 版本起就建議使用 `find_multipaths: no`。
+
+
+
+====
+
+
+[[install-trident-using-tridentctl]]
+== 使用以下方式安裝 Trident `tridentctl`
+
+檢查 link:kubernetes-deploy.html["安裝概述"] 以確保滿足安裝先決條件並為您的環境選擇了正確的安裝選項。
+
+.開始之前
+在開始安裝之前，請登入 Linux 主機並驗證它是否正在管理運作中的 link:../trident-get-started/requirements.html["支援的 Kubernetes 叢集"^]，以及您是否擁有必要的權限。
+
+
+NOTE: 使用 OpenShift 時，請在以下所有範例中使用 `oc`而非 `kubectl`，並先執行 `oc login -u system:admin`或 `oc login -u kube-admin`以 *system:admin* 身分登入。
+
+[%collapsible%open]
+====
+. 驗證您的 Kubernetes 版本：
++
+[listing]
+----
+kubectl version
+----
+. 驗證叢集管理員權限：
++
+[listing]
+----
+kubectl auth can-i '*' '*' --all-namespaces
+----
+. 驗證您是否可以啟動使用 Docker Hub 映像的 pod ，並透過 pod 網路存取您的儲存系統：
++
+[listing]
+----
+kubectl run -i --tty ping --image=busybox --restart=Never --rm -- \
+  ping <management IP>
+----
+
+
+====
+
+
+[[step-1-download-the-trident-installer-package]]
+== 步驟 1：下載 Trident 安裝程式套件
+
+Trident 安裝程式套件會建立一個 Trident pod，配置用於維護其狀態的 CRD 對象，並初始化 CSI sidecar 以執行諸如配置磁碟區和將磁碟區附加到叢集主機等操作。從link:https://github.com/NetApp/trident/releases/latest["GitHub 上的_資產_部分"^]下載並解壓縮最新版本的 Trident 安裝程式。將範例中的 _<trident-installer-XX.XX.X.tar.gz>_ 更新為您選擇的 Trident 版本。
+
+[listing]
+----
+wget https://github.com/NetApp/trident/releases/download/v26.06.0/trident-installer-26.06.0.tar.gz
+tar -xf trident-installer-26.06.0.tar.gz
+cd trident-installer
+----
+
+
+[[step-2-install-trident]]
+== 步驟 2：安裝 Trident
+
+透過執行 `tridentctl install`指令，在所需的命名空間中安裝 Trident。您可以新增其他參數來指定映像登錄位置。
+
+[role="tabbed-block"]
+====
+.標準模式
+--
+[listing]
+----
+./tridentctl install -n trident
+----
+--
+.一個登錄中的映像
+--
+[listing]
+----
+./tridentctl install -n trident --image-registry <your-registry> --autosupport-image <your-registry>/trident-autosupport:26.06 --trident-image <your-registry>/trident:26.06.0
+----
+--
+.不同登錄中的映像
+--
+[listing]
+----
+./tridentctl install -n trident --image-registry <your-registry> --autosupport-image <your-registry>/trident-autosupport:26.06 --trident-image <your-registry>/trident:26.06.0
+----
+--
+====
+您的安裝狀態應該類似這樣。
+
+[listing]
+----
+....
+INFO Starting Trident installation.                namespace=trident
+INFO Created service account.
+INFO Created cluster role.
+INFO Created cluster role binding.
+INFO Added finalizers to custom resource definitions.
+INFO Created Trident service.
+INFO Created Trident secret.
+INFO Created Trident deployment.
+INFO Created Trident daemonset.
+INFO Waiting for Trident pod to start.
+INFO Trident pod started.                          namespace=trident pod=trident-controller-679648bd45-cv2mx
+INFO Waiting for Trident REST interface.
+INFO Trident REST interface is up.                 version=26.10.0
+INFO Trident installation succeeded.
+....
+----
+
+
+[[verify-the-installation]]
+== 驗證安裝
+
+您可以使用 pod 建立狀態或 `tridentctl`來驗證您的安裝。
+
+
+
+[[using-pod-creation-status]]
+=== 使用 pod 建立狀態
+
+您可以透過檢視已建立的 pod 的狀態來確認 Trident 安裝是否已完成：
+
+[listing]
+----
+kubectl get pods -n trident
+
+NAME                                  READY   STATUS    RESTARTS   AGE
+trident-controller-679648bd45-cv2mx   6/6     Running   0          5m29s
+trident-node-linux-vgc8n              2/2     Running   0          5m29s
+----
+
+NOTE: 如果安裝程式未成功完成或 `trident-controller-<generated id>` (`trident-csi-<generated id>`在 23.01 之前的版本中未顯示 *Running* 狀態，則表示平台未安裝。請使用 `-d`來link:../troubleshooting.html#unsuccessful-trident-deployment-using-tridentctl["開啟偵錯模式"]並排查問題。
+
+
+
+[[using-tridentctl]]
+=== 使用 `tridentctl`
+
+您可以使用 `tridentctl`檢查已安裝的 Trident 版本。
+
+[listing]
+----
+./tridentctl -n trident version
+
++----------------+----------------+
+| SERVER VERSION | CLIENT VERSION |
++----------------+----------------+
+| 26.06.0        | 26.06.0        |
++----------------+----------------+
+----
+
+
+[[sample-configurations]]
+== 範例組態
+
+以下範例提供使用 `tridentctl`安裝 Trident 的範例組態。
+
+.Windows 節點
+[%collapsible]
+====
+要讓 Trident 能夠在 Windows 節點上運作：
+
+[listing]
+----
+tridentctl install --windows -n trident
+----
+====
+.強制分離
+[%collapsible]
+====
+如需相關資訊，請參閱 link:../trident-reco/force-detach.html["使用 Trident 自動化具狀態應用程式的容錯移轉"]。
+
+[listing]
+----
+tridentctl install --enable-force-detach=true -n trident
+----
+====
+.啟用並發的 Trident 控制器操作
+[%collapsible]
+====
+若要啟用並行 Trident 控制器作業以提高處理量，請在安裝期間新增  `--enable-concurrency` 選項，如本範例所示。如需支援驅動程式的詳細資訊，請參閱連結： https://docs.netapp.com/us-en/trident/trident-use/controller-scalability.html#controller-scalability[控制器擴充性文件]。
+
+[listing]
+----
+tridentctl install --enable-concurrency -n trident
+----
+====

@@ -1,0 +1,413 @@
+---
+sidebar: sidebar 
+permalink: trident-use/vol-snapshots.html 
+keywords: volumes, on-demand volume snapshots, create snapshots, backends, kubernetes, create PVCs, PVCs, snapshot, volume snapshot, import snapshot, recover data 
+summary: Kubernetes 持久磁碟區（PV）的磁碟區快照功能可以建立磁碟區的特定時間點副本。您可以建立使用 Trident 建立的磁碟區快照、匯入在 Trident 外部建立的快照、從現有快照建立新磁碟區，以及從快照還原磁碟區資料。 
+---
+= 使用 Trident 快照
+:hardbreaks:
+:allow-uri-read: 
+:icons: font
+:imagesdir: ../media/
+
+
+[role="lead"]
+Kubernetes 持久磁碟區（PV）的磁碟區快照功能可以建立磁碟區的特定時間點副本。您可以建立使用 Trident 建立的磁碟區快照、匯入在 Trident 外部建立的快照、從現有快照建立新磁碟區，以及從快照還原磁碟區資料。
+
+
+
+[[overview]]
+== 概況
+
+Volume snapshot 受 `ontap-nas`、 `ontap-nas-flexgroup`、 `ontap-san`、 `ontap-san-economy`、 `solidfire-san`、 `azure-netapp-files`和 `google-cloud-netapp-volumes`驅動程式支援。
+
+.開始之前
+若要使用快照，您必須擁有外部快照控制器和自訂資源定義（CRD）。這是 Kubernetes 編排器（例如：Kubeadm、GKE、OpenShift）的職責。
+
+如果您的 Kubernetes 發行版不包含快照控制器和 CRD ，請參閱 <<部署 Volume Snapshot Controller>>。
+
+
+NOTE: 如果要在 GKE 環境中建立按需磁碟區快照、請勿建立快照控制器。GKE 使用內建的隱藏快照控制器。
+
+
+
+[[create-a-volume-snapshot]]
+== 建立 Volume Snapshot
+
+.步驟
+. 建立  `VolumeSnapshotClass`。如需詳細資訊、請參閱 link:../trident-reference/objects.html#kubernetes-volumesnapshotclass-objects["VolumeSnapshotClass"]。
++
+**  `driver` 指向 Trident CSI 驅動程式。
+** `deletionPolicy` 可以是  `Delete` 或  `Retain`。設定為  `Retain` 時，即使  `VolumeSnapshot` 物件被刪除，儲存叢集上的底層實體快照也會被保留。
++
+.範例
+[listing]
+----
+cat snap-sc.yaml
+----
++
+[source, yaml]
+----
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotClass
+metadata:
+  name: csi-snapclass
+driver: csi.trident.netapp.io
+deletionPolicy: Delete
+----
+
+
+. 建立現有 PVC 的快照。
++
+.範例
+** 此範例會建立現有 PVC 的快照。
++
+[listing]
+----
+cat snap.yaml
+----
++
+[source, yaml]
+----
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshot
+metadata:
+  name: pvc1-snap
+spec:
+  volumeSnapshotClassName: csi-snapclass
+  source:
+    persistentVolumeClaimName: pvc1
+----
+** 此範例為名為 `pvc1`的 PVC 建立磁碟區快照物件，並將快照名稱設為 `pvc1-snap`。VolumeSnapshot 類似於 PVC，並與 `VolumeSnapshotContent`物件相關聯，該物件代表實際快照。
++
+[listing]
+----
+kubectl create -f snap.yaml
+volumesnapshot.snapshot.storage.k8s.io/pvc1-snap created
+
+kubectl get volumesnapshots
+NAME                   AGE
+pvc1-snap              50s
+----
+** 您可以透過描述該 `VolumeSnapshotContent` 物件來識別 `pvc1-snap` VolumeSnapshot。該 `Snapshot Content Name` 會識別提供此快照的 VolumeSnapshotContent 物件。該 `Ready To Use` 參數表示此快照可用於建立新的 PVC。
++
+[listing]
+----
+kubectl describe volumesnapshots pvc1-snap
+Name:         pvc1-snap
+Namespace:    default
+...
+Spec:
+  Snapshot Class Name:    pvc1-snap
+  Snapshot Content Name:  snapcontent-e8d8a0ca-9826-11e9-9807-525400f3f660
+  Source:
+    API Group:
+    Kind:       PersistentVolumeClaim
+    Name:       pvc1
+Status:
+  Creation Time:  2019-06-26T15:27:29Z
+  Ready To Use:   true
+  Restore Size:   3Gi
+...
+----
+
+
+
+
+
+
+[[create-a-pvc-from-a-volume-snapshot]]
+== 從磁碟區快照建立 PVC
+
+您可以使用 `dataSource`來建立 PVC，使用名為 `<pvc-name>`的 VolumeSnapshot 作為資料來源。建立 PVC 後，可以將其附加到 pod 上，並像使用其他 PVC 一樣使用它。
+
+
+WARNING: PVC 將在與來源磁碟區相同的後端建立。請參閱 link:https://kb.netapp.com/Cloud/Astra/Trident/Creating_a_PVC_from_a_Trident_PVC_Snapshot_cannot_be_created_in_an_alternate_backend["知識庫：無法在備用後端從 Trident PVC 快照建立 PVC"^]。
+
+以下範例使用  `pvc1-snap` 作為資料來源建立 PVC。
+
+[listing]
+----
+cat pvc-from-snap.yaml
+----
+[source, yaml]
+----
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-from-snap
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: golden
+  resources:
+    requests:
+      storage: 3Gi
+  dataSource:
+    name: pvc1-snap
+    kind: VolumeSnapshot
+    apiGroup: snapshot.storage.k8s.io
+----
+
+
+[[import-a-volume-snapshot]]
+== 匯入磁碟區快照
+
+Trident 支援link:https://kubernetes.io/docs/concepts/storage/volume-snapshots/#static["Kubernetes 預先配置快照流程"^]讓叢集管理員建立 `VolumeSnapshotContent`物件並匯入在 Trident 外部建立的快照。
+
+.開始之前
+Trident 必須已建立或匯入快照的父 Volume 。
+
+.步驟
+. *叢集管理員：* 建立一個 `VolumeSnapshotContent`物件，參照後端快照。這會在 Trident 中啟動快照工作流程。
++
+** 在 `annotations`中將後端快照的名稱指定為 `trident.netapp.io/internalSnapshotName: <"backend-snapshot-name">`。
+** 請在 `<name-of-parent-volume-in-trident>/<volume-snapshot-content-name>`中指定 `snapshotHandle`。這是外部快照工具在 `ListSnapshots`呼叫中提供給 Trident 的唯一資訊。
++
+
+NOTE:  `<volumeSnapshotContentName>` 由於 CR 命名限制，無法始終與後端快照名稱相符。
+
++
+.範例
+以下範例建立了一個 `VolumeSnapshotContent`物件，該物件引用後端快照 `snap-01`。
+
++
+[source, yaml]
+----
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotContent
+metadata:
+  name: import-snap-content
+  annotations:
+    trident.netapp.io/internalSnapshotName: "snap-01"  # This is the name of the snapshot on the backend
+spec:
+  deletionPolicy: Retain
+  driver: csi.trident.netapp.io
+  source:
+    snapshotHandle: pvc-f71223b5-23b9-4235-bbfe-e269ac7b84b0/import-snap-content # <import PV name or source PV name>/<volume-snapshot-content-name>
+  volumeSnapshotRef:
+    name: import-snap
+    namespace: default
+----
+
+
+. *Cluster admin：* 建立 `VolumeSnapshot` CR，參照 `VolumeSnapshotContent`物件。這會要求存取權限，以便在指定的命名空間中使用 `VolumeSnapshot`。
++
+.範例
+以下範例會建立一個 `VolumeSnapshot` CR，名為 `import-snap`，該 CR 會參照 `VolumeSnapshotContent`，名為 `import-snap-content`。
+
++
+[source, yaml]
+----
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshot
+metadata:
+  name: import-snap
+spec:
+  # volumeSnapshotClassName: csi-snapclass (not required for pre-provisioned or imported snapshots)
+  source:
+    volumeSnapshotContentName: import-snap-content
+----
+. *內部處理（無需操作）：*外部快照程式識別新建立的 `VolumeSnapshotContent`並執行 `ListSnapshots`呼叫。Trident 建立 `TridentSnapshot`。
++
+** 外部 snapshotter 會將  `VolumeSnapshotContent` 設為  `readyToUse`，並將  `VolumeSnapshot` 設為  `true`。
+** Trident 返回 `readyToUse=true`。
+
+
+. *任何使用者：* 建立一個  `PersistentVolumeClaim` 以參照新的  `VolumeSnapshot`，其中  `spec.dataSource`（或  `spec.dataSourceRef`）名稱是  `VolumeSnapshot` 名稱。
++
+.範例
+以下範例建立了一個 PVC，參考名為 `VolumeSnapshot`的 `import-snap`。
+
++
+[source, yaml]
+----
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-from-snap
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: simple-sc
+  resources:
+    requests:
+      storage: 1Gi
+  dataSource:
+    name: import-snap
+    kind: VolumeSnapshot
+    apiGroup: snapshot.storage.k8s.io
+----
+
+
+
+
+[[recover-volume-data-using-snapshots]]
+== 使用快照恢復磁碟區資料
+
+預設情況下，快照目錄處於隱藏狀態，以確保使用  `ontap-nas` 和  `ontap-nas-economy` 驅動程式配置的磁碟區的最大相容性。啟用  `.snapshot` 目錄即可直接從快照還原資料。
+
+使用 volume snapshot restore ONTAP CLI 將磁碟區還原到先前快照中記錄的狀態。
+
+[listing]
+----
+cluster1::*> volume snapshot restore -vserver vs0 -volume vol3 -snapshot vol3_snap_archive
+----
+
+NOTE: 還原 Snapshot 複本時、現有的 Volume 組態會被覆寫。建立 Snapshot 複本後對 Volume 資料所做的變更將會遺失。
+
+
+
+[[in-place-volume-restoration-from-a-snapshot]]
+== 從快照進行就地 Volume 還原
+
+Trident 使用  `TridentActionSnapshotRestore` (TASR) CR 從快照快速進行原廠磁碟區復原。此 CR 作為一項命令式 Kubernetes 操作運行，操作完成後不會持久保存。
+
+Trident 支援在 `ontap-san`、 `ontap-san-economy`、 `ontap-nas`、 `ontap-nas-flexgroup`、 `azure-netapp-files`、 `google-cloud-netapp-volumes`和 `solidfire-san`驅動程式上進行快照還原。
+
+.開始之前
+您必須擁有已綁定的 PVC 和可用的磁碟區快照。
+
+* 確認 PVC 狀態為已綁定。
++
+[source, console]
+----
+kubectl get pvc
+----
+* 確認磁碟區快照已準備就緒可供使用。
++
+[source, console]
+----
+kubectl get vs
+----
+
+
+.步驟
+. 建立 TASR CR。此範例為 PVC `pvc1` 和磁碟區快照 `pvc1-snapshot`建立 CR。
++
+
+NOTE: TASR CR 必須位於 PVC 和 VS 存在的命名空間中。
+
++
+[source, console]
+----
+cat tasr-pvc1-snapshot.yaml
+----
++
+[source, yaml]
+----
+apiVersion: trident.netapp.io/v1
+kind: TridentActionSnapshotRestore
+metadata:
+  name: trident-snap
+  namespace: trident
+spec:
+  pvcName: pvc1
+  volumeSnapshotName: pvc1-snapshot
+----
+. 套用 CR 從快照還原。此範例從快照還原 `pvc1`。
++
+[source, console]
+----
+kubectl create -f tasr-pvc1-snapshot.yaml
+----
++
+[listing]
+----
+tridentactionsnapshotrestore.trident.netapp.io/trident-snap created
+----
+
+
+.結果
+Trident 會從快照還原資料。您可以驗證快照還原狀態：
+
+[source, console]
+----
+kubectl get tasr -o yaml
+----
+[source, yaml]
+----
+apiVersion: trident.netapp.io/v1
+items:
+- apiVersion: trident.netapp.io/v1
+  kind: TridentActionSnapshotRestore
+  metadata:
+    creationTimestamp: "2023-04-14T00:20:33Z"
+    generation: 3
+    name: trident-snap
+    namespace: trident
+    resourceVersion: "3453847"
+    uid: <uid>
+  spec:
+    pvcName: pvc1
+    volumeSnapshotName: pvc1-snapshot
+  status:
+    startTime: "2023-04-14T00:20:34Z"
+    completionTime: "2023-04-14T00:20:37Z"
+    state: Succeeded
+kind: List
+metadata:
+  resourceVersion: ""
+----
+[NOTE]
+====
+* 在大多數情況下，Trident 不會在操作失敗後自動重試。您需要再次執行該操作。
+* 沒有管理員權限的 Kubernetes 使用者可能需要管理員授予權限才能在其應用程式命名空間中建立 TASR CR。
+
+
+====
+
+
+[[delete-a-pv-with-associated-snapshots]]
+== 刪除具有相關快照的 PV
+
+刪除包含關聯快照的持久性磁碟區時，對應的 Trident 磁碟區會更新為「正在刪除」狀態。刪除磁碟區快照即可刪除 Trident 磁碟區。
+
+
+
+[[deploy-a-volume-snapshot-controller]]
+== 部署 Volume Snapshot Controller
+
+如果您的 Kubernetes 發行版不包含快照控制器和 CRD、您可以依照下列方式部署它們。
+
+.步驟
+. 建立 Volume Snapshot CRD。
++
+[listing]
+----
+cat snapshot-setup.sh
+----
++
+[source, sh]
+----
+#!/bin/bash
+# Create volume snapshot CRDs
+kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/release-6.1/client/config/crd/snapshot.storage.k8s.io_volumesnapshotclasses.yaml
+kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/release-6.1/client/config/crd/snapshot.storage.k8s.io_volumesnapshotcontents.yaml
+kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/release-6.1/client/config/crd/snapshot.storage.k8s.io_volumesnapshots.yaml
+----
+. 建立 Snapshot Controller。
++
+[source, console]
+----
+kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/release-6.1/deploy/kubernetes/snapshot-controller/rbac-snapshot-controller.yaml
+----
++
+[source, console]
+----
+kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/release-6.1/deploy/kubernetes/snapshot-controller/setup-snapshot-controller.yaml
+----
++
+
+NOTE: 如有必要，請打開  `deploy/kubernetes/snapshot-controller/rbac-snapshot-controller.yaml` 並更新  `namespace` 到您的命名空間。
+
+
+
+
+
+[[related-links]]
+== 相關連結
+
+* link:../trident-concepts/snapshots.html["Volume 快照"]
+* link:../trident-reference/objects.html["VolumeSnapshotClass"]
+

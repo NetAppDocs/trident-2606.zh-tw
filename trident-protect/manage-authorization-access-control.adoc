@@ -1,0 +1,323 @@
+---
+permalink: trident-protect/manage-authorization-access-control.html 
+sidebar: sidebar 
+keywords: manage, authentication, rbac 
+summary: Trident Protect 使用 Kubernetes 的角色型存取控制（RBAC）模型。您可以使用 Trident Protect RBAC 功能更精細地控制對資源的存取。 
+---
+= 管理 Trident Protect 授權和存取控制
+:allow-uri-read: 
+:icons: font
+:imagesdir: ../media/
+
+
+[role="lead"]
+Trident Protect 使用 Kubernetes 的角色型存取控制（RBAC）模型。預設情況下，Trident Protect 提供單一系統命名空間及其相關的預設服務帳戶。如果您的組織擁有眾多使用者或有特定的安全需求，則可以使用 Trident Protect 的 RBAC 功能來更精細地控制對資源和命名空間的存取。
+
+叢集管理員始終擁有對預設  `trident-protect` 命名空間中資源的存取權限，並且還可以存取所有其他命名空間中的資源。要控制對資源和應用程式的存取，您需要建立其他命名空間，並將資源和應用程式新增至這些命名空間。
+
+請注意，任何使用者都無法在預設 `trident-protect`命名空間中建立應用程式資料管理 CR。您需要在應用程式命名空間中建立應用程式資料管理 CR（最佳實踐是將應用程式資料管理 CR 建立在與其關聯應用程式相同的命名空間中）。
+
+[NOTE]
+====
+只有管理員才能存取具有特權的 Trident Protect 自訂資源物件，其中包括：
+
+* *AppVault*：需要儲存桶憑證資料
+* *AutoSupportBundle*：收集指標、日誌和其他敏感的 Trident Protect 數據
+* *AutoSupportBundleSchedule*：管理日誌收集排程
+
+
+最佳實踐是使用 RBAC 將對特權物件的存取限制在管理員範圍內。
+
+====
+如需有關 RBAC 如何管理對資源和命名空間的存取的詳細資訊，請參閱 https://kubernetes.io/docs/reference/access-authn-authz/rbac/["Kubernetes RBAC 文件"^]。
+
+如需服務帳戶的相關資訊，請參閱 https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/["Kubernetes 服務帳戶文件"^]。
+
+
+
+[[example-manage-access-for-two-groups-of-users]]
+== 範例：管理兩組使用者的存取權限
+
+例如，一個組織有一名 cluster 管理員、一組工程用戶和一組行銷用戶。cluster 管理員需要完成以下任務，以建立一個環境，使工程使用者群組和行銷使用者群組各自只能存取分配給其各自 namespace 的資源。
+
+
+
+[[step-1-create-a-namespace-to-contain-resources-for-each-group]]
+=== 步驟 1：建立命名空間以包含每個群組的資源
+
+建立命名空間可讓您以邏輯方式分隔資源，並更有效地控制誰可以存取這些資源。
+
+.步驟
+. 為工程群組建立命名空間：
++
+[source, console]
+----
+kubectl create ns engineering-ns
+----
+. 為行銷組建立命名空間：
++
+[source, console]
+----
+kubectl create ns marketing-ns
+----
+
+
+
+
+[[step-2-create-new-service-accounts-to-interact-with-resources-in-each-namespace]]
+=== 步驟 2：建立新的服務帳戶、以便與每個命名空間中的資源互動
+
+您建立的每個新命名空間都附帶一個預設服務帳戶，但您應該為每個使用者群組建立一個服務帳戶，以便將來必要時可以進一步在群組之間劃分權限。
+
+.步驟
+. 為工程群組建立服務帳戶：
++
+[source, yaml]
+----
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: eng-user
+  namespace: engineering-ns
+----
+. 為行銷群組建立服務帳戶：
++
+[source, yaml]
+----
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mkt-user
+  namespace: marketing-ns
+----
+
+
+
+
+[[step-3-create-a-secret-for-each-new-service-account]]
+=== 步驟 3：為每個新服務帳戶建立一個密碼
+
+服務帳戶密碼用於對服務帳戶進行身分驗證，如果遭到洩露，可以輕鬆刪除並重新建立。
+
+.步驟
+. 為工程服務帳戶建立密鑰：
++
+[source, yaml]
+----
+apiVersion: v1
+kind: Secret
+metadata:
+  annotations:
+    kubernetes.io/service-account.name: eng-user
+  name: eng-user-secret
+  namespace: engineering-ns
+type: kubernetes.io/service-account-token
+----
+. 為行銷服務帳戶建立密鑰：
++
+[source, yaml]
+----
+apiVersion: v1
+kind: Secret
+metadata:
+  annotations:
+    kubernetes.io/service-account.name: mkt-user
+  name: mkt-user-secret
+  namespace: marketing-ns
+type: kubernetes.io/service-account-token
+----
+
+
+
+
+[[step-4-create-a-rolebinding-object-to-bind-the-clusterrole-object-to-each-new-service-account]]
+=== 步驟 4：建立一個 RoleBinding 對象，並將該 ClusterRole 對象綁定到每個新的服務帳戶
+
+當您安裝 Trident Protect 時，會自動建立一個預設的 ClusterRole 物件。您可以透過建立並套用 RoleBinding 物件，將此 ClusterRole 綁定至服務帳戶。
+
+.步驟
+. 將 ClusterRole 綁定到工程服務帳戶：
++
+[source, yaml]
+----
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: engineering-ns-tenant-rolebinding
+  namespace: engineering-ns
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: trident-protect-tenant-cluster-role
+subjects:
+- kind: ServiceAccount
+  name: eng-user
+  namespace: engineering-ns
+----
+. 將 ClusterRole 綁定到行銷服務帳戶：
++
+[source, yaml]
+----
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: marketing-ns-tenant-rolebinding
+  namespace: marketing-ns
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: trident-protect-tenant-cluster-role
+subjects:
+- kind: ServiceAccount
+  name: mkt-user
+  namespace: marketing-ns
+----
+
+
+
+
+[[step-5-test-permissions]]
+=== 步驟 5：測試權限
+
+測試權限是否正確。
+
+.步驟
+. 確認工程使用者可以存取工程資源：
++
+[source, console]
+----
+kubectl auth can-i --as=system:serviceaccount:engineering-ns:eng-user get applications.protect.trident.netapp.io -n engineering-ns
+----
+. 確認工程使用者無法存取行銷資源：
++
+[source, console]
+----
+kubectl auth can-i --as=system:serviceaccount:engineering-ns:eng-user get applications.protect.trident.netapp.io -n marketing-ns
+----
+
+
+
+
+[[step-6-grant-access-to-appvault-objects]]
+=== 步驟 6：授予 AppVault 物件存取權限
+
+要執行備份和快照等資料管理任務，叢集管理員需要授予個別使用者對 AppVault 物件的存取權限。
+
+.步驟
+. 建立並套用 AppVault 和密碼組合 YAML 檔案，授予使用者存取 AppVault 的權限。例如，以下 CR 授予使用者存取 AppVault 的權限 `eng-user`：
++
+[source, yaml]
+----
+apiVersion: v1
+data:
+  accessKeyID: <ID_value>
+  secretAccessKey: <key_value>
+kind: Secret
+metadata:
+  name: appvault-for-eng-user-only-secret
+  namespace: trident-protect
+type: Opaque
+---
+apiVersion: protect.trident.netapp.io/v1
+kind: AppVault
+metadata:
+  name: appvault-for-eng-user-only
+  namespace: trident-protect # Trident Protect system namespace
+spec:
+  providerConfig:
+    azure:
+      accountName: ""
+      bucketName: ""
+      endpoint: ""
+    gcp:
+      bucketName: ""
+      projectID: ""
+    s3:
+      bucketName: testbucket
+      endpoint: 192.168.0.1:30000
+      secure: "false"
+      skipCertValidation: "true"
+  providerCredentials:
+    accessKeyID:
+      valueFromSecret:
+        key: accessKeyID
+        name: appvault-for-eng-user-only-secret
+    secretAccessKey:
+      valueFromSecret:
+        key: secretAccessKey
+        name: appvault-for-eng-user-only-secret
+  providerType: GenericS3
+----
+. 建立並套用 Role CR，以使叢集管理員能夠授予對命名空間中特定資源的存取權。例如：
++
+[source, yaml]
+----
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: eng-user-appvault-reader
+  namespace: trident-protect
+rules:
+- apiGroups:
+  - protect.trident.netapp.io
+  resourceNames:
+  - appvault-for-enguser-only
+  resources:
+  - appvaults
+  verbs:
+  - get
+----
+. 建立並套用 RoleBinding CR，將權限綁定到使用者 eng-user。例如：
++
+[source, yaml]
+----
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: eng-user-read-appvault-binding
+  namespace: trident-protect
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: eng-user-appvault-reader
+subjects:
+- kind: ServiceAccount
+  name: eng-user
+  namespace: engineering-ns
+----
+. 確認權限是否正確。
++
+.. 嘗試檢索所有命名空間的 AppVault 物件資訊：
++
+[source, console]
+----
+kubectl get appvaults -n trident-protect --as=system:serviceaccount:engineering-ns:eng-user
+----
++
+您應該會看到類似以下內容的輸出：
+
++
+[listing]
+----
+Error from server (Forbidden): appvaults.protect.trident.netapp.io is forbidden: User "system:serviceaccount:engineering-ns:eng-user" cannot list resource "appvaults" in API group "protect.trident.netapp.io" in the namespace "trident-protect"
+----
+.. 測試用戶是否可以獲得他們現在有權訪問的 AppVault 資訊：
++
+[source, console]
+----
+kubectl auth can-i --as=system:serviceaccount:engineering-ns:eng-user get appvaults.protect.trident.netapp.io/appvault-for-eng-user-only -n trident-protect
+----
++
+您應該會看到類似以下內容的輸出：
+
++
+[listing]
+----
+yes
+----
+
+
+
+
+.結果
+您授予 AppVault 權限的使用者應該能夠使用授權 AppVault 物件進行應用程式資料管理操作，並且不應該能夠存取指派的命名空間以外的任何資源，或建立他們無權存取的新資源。

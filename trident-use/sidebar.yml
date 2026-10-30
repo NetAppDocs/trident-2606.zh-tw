@@ -1,0 +1,116 @@
+---
+section: trident-use
+title: 使用 Trident
+entries:
+- title: 準備工作節點
+  url: "/trident-use/worker-node-prep.html"
+- title: 設定和管理後端
+  entries:
+  - title: 概況
+    url: "/trident-use/backends.html"
+  - title: Azure NetApp Files
+    entries:
+    - title: 概況
+      url: "/trident-use/anf.html"
+    - title: 準備設定
+      url: "/trident-use/anf-prep.html"
+    - title: 組態選項和範例
+      url: "/trident-use/anf-examples.html"
+  - title: Google Cloud NetApp Volumes
+    entries:
+    - title: 概況
+      url: "/trident-use/gcnv.html"
+    - title: 設定區塊儲存設備
+      url: "/trident-use/gcnv-block.html"
+    - title: 準備設定
+      url: "/trident-use/gcnv-prep.html"
+    - title: 組態選項和範例
+      url: "/trident-use/gcnv-examples.html"
+    - title: 設定自動分層
+      url: "/trident-use/gcnv-auto-tiering.html"
+    - title: 配置 ONTAP 模式儲存池
+      url: "/trident-use/gcnv-ontap-mode.html"
+  - title: NetApp HCI 或 SolidFire
+    url: "/trident-use/element.html"
+  - title: ONTAP SAN 驅動程式
+    entries:
+    - title: 概況
+      url: "/trident-use/ontap-san.html"
+    - title: 準備設定
+      url: "/trident-use/ontap-san-prep.html"
+    - title: 組態選項和範例
+      url: "/trident-use/ontap-san-examples.html"
+  - title: ONTAP NAS 驅動程式
+    entries:
+    - title: 概況
+      url: "/trident-use/ontap-nas.html"
+    - title: 準備設定
+      url: "/trident-use/ontap-nas-prep.html"
+    - title: 組態選項和範例
+      url: "/trident-use/ontap-nas-examples.html"
+  - title: 使用 ONTAP 後端進行均衡放置
+    url: "/trident-use/ontap-balanced-placement.html"
+  - title: Amazon FSx for NetApp ONTAP
+    entries:
+    - title: 概況
+      url: "/trident-use/trident-fsx.html"
+    - title: 建立 IAM 角色和 AWS 密碼
+      url: "/trident-use/trident-fsx-iam-role.html"
+    - title: 安裝 Trident
+      url: "/trident-use/trident-fsx-install-trident.html"
+    - title: 設定儲存類別
+      url: "/trident-use/trident-fsx-storageclass-pvc.html"
+    - title: 配置 PVC
+      url: "/trident-use/trident-fsx-create-pvc.html"
+    - title: 部署範例應用程式
+      url: "/trident-use/trident-fsx-deploy-sample.html"
+    - title: 在 EKS 叢集上設定 Trident EKS 附加元件
+      url: "/trident-use/trident-aws-addon.html"
+  - title: 使用 kubectl 建立後端
+    url: "/trident-use/backend-kubectl.html"
+  - title: 管理後端
+    entries:
+    - title: 使用 kubectl 管理後端
+      url: "/trident-use/backend_ops_kubectl.html"
+    - title: 使用 tridentctl 管理後端
+      url: "/trident-use/backend_ops_tridentctl.html"
+    - title: 在後端管理選項之間移動
+      url: "/trident-use/backend_options.html"
+- title: 建立和管理儲存類別
+  entries:
+  - title: 建立儲存類別
+    url: "/trident-use/create-stor-class.html"
+  - title: 管理儲存類別
+    url: "/trident-use/manage-stor-class.html"
+- title: 配置和管理磁碟區
+  entries:
+  - title: 配置磁碟區
+    url: "/trident-use/vol-provision.html"
+  - title: 移動磁碟區
+    url: "/trident-use/vol-move.html"
+  - title: 擴充磁碟區
+    url: "/trident-use/vol-expansion.html"
+  - title: 了解 RWX NVMe 子系統限制
+    url: "/trident-use/trident-nvme-rwx-subsystem-limits.html"
+  - title: 控制器擴充性
+    url: "/trident-use/controller-scalability.html"
+  - title: 自動磁碟區擴充
+    url: "/trident-use/automatic-volume-expansion.html"
+  - title: 管理自動磁碟區擴充
+    url: "/trident-use/manage-autogrow-policies.html"
+  - title: 匯入磁碟區
+    url: "/trident-use/vol-import.html"
+  - title: 自訂磁碟區名稱
+    url: "/trident-use/vol-custom-name.html"
+  - title: 跨命名空間共享 NFS 磁碟區
+    url: "/trident-use/volume-share.html"
+  - title: 跨命名空間複製磁碟區
+    url: "/trident-use/vol-clone-cross-namespace.html"
+  - title: 使用 SnapMirror 複製磁碟區
+    url: "/trident-use/vol-volume-replicate.html"
+  - title: 使用 CSI 拓撲
+    url: "/trident-use/csi-topology.html"
+  - title: 使用快照
+    url: "/trident-use/vol-snapshots.html"
+  - title: 建立 Volume Group 快照
+    url: "/trident-use/vol-group-snapshots.html"

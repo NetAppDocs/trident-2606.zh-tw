@@ -1,0 +1,59 @@
+---
+sidebar: sidebar 
+permalink: trident-reference/trident-cl.html 
+keywords: command-line, options, logging, kubernetes, docker, ports 
+summary: Trident 為 Trident 協調器公開了幾個命令列選項，並透過某些連接埠進行通訊。 
+---
+= 命令列選項
+:hardbreaks:
+:allow-uri-read: 
+:icons: font
+:imagesdir: ../media/
+
+
+[role="lead"]
+Trident 為 Trident 協調器公開了多個命令列選項。您可以使用這些選項來修改部署。
+
+
+
+[[logging]]
+== 日誌記錄
+
+`-debug`:: 啟用偵錯輸出。
+`-loglevel <level>`:: 設定日誌等級（debug、info、warn、error、fatal）。預設為 info。
+
+
+
+
+[[kubernetes]]
+== Kubernetes
+
+`-k8s_pod`:: 使用此選項或 `-k8s_api_server`啟用 Kubernetes 支援。設定此選項會導致 Trident 使用其所在 Pod 的 Kubernetes 服務帳戶認證來聯絡 API 伺服器。此功能僅在 Trident 作為 Pod 在已啟用服務帳戶的 Kubernetes 叢集中執行時才有效。
+`-k8s_api_server <insecure-address:insecure-port>`:: 使用此選項或 `-k8s_pod`啟用 Kubernetes 支援。指定後，Trident 會使用提供的不安全位址和連接埠連線至 Kubernetes API 伺服器。這使得 Trident 可以部署在 Pod 之外；但是，它僅支援與 API 伺服器的不安全連線。若要安全連線，請使用 `-k8s_pod`選項在 Pod 中部署 Trident。
+
+
+
+
+[[docker]]
+== Docker
+
+`-volume_driver <name>`:: 註冊 Docker 外掛程式時使用的驅動程式名稱。預設為 `netapp`。
+`-driver_port <port-number>`:: 在此連接埠上進行監聽，而非 UNIX 網域通訊端。
+`-config <file>`:: 必填項；您必須指定後端組態檔的路徑。
+
+
+
+
+[[rest]]
+== REST
+
+`-address <ip-or-host>`:: 指定 Trident REST 伺服器監聽的位址。預設為 localhost。當監聽 localhost 且運作在 Kubernetes Pod 內時，REST 介面無法從 Pod 外部直接存取。使用 `-address ""`可使 REST 介面可透過 Pod IP 位址存取。
++
+--
+
+CAUTION: Trident REST 介面可以設定為僅監聽和提供服務於 127.0.0.1 （適用於 IPv4）或 [::1] （適用於 IPv6）。
+
+--
+`-port <port-number>`:: 指定 Trident REST 伺服器監聽的連接埠。預設為 8000。
+`-rest`:: 啟用 REST 介面。預設為 true。
+

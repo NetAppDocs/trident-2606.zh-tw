@@ -1,0 +1,15 @@
+---
+sidebar: sidebar 
+permalink: trident-reference/k8s-concepts.html 
+keywords: kubernetes, clusters, master, compute, architecture 
+summary: 深入瞭解 Kubernetes 系統的各個組成部分。 
+---
+= Kubernetes 概念
+:hardbreaks:
+:allow-uri-read: 
+:icons: font
+:imagesdir: ../media/
+
+
+[role="lead"]
+深入瞭解  https://kubernetes.io/docs/concepts/["Kubernetes 系統"^] 的各個部分。

@@ -1,0 +1,190 @@
+---
+sidebar: sidebar 
+permalink: trident-use/vol-group-snapshots.html 
+keywords: volumes, on-demand volume group snapshots, csi, csi snapshots, create snapshots, backends, kubernetes, create PVCs, PVCs, snapshot, volume snapshot, import snapshot, recover data 
+summary: Kubernetes 持久磁碟區（PV）的磁碟區快照功能可以建立磁碟區的特定時間點副本。您可以建立使用 Trident 建立的磁碟區快照、匯入在 Trident 外部建立的快照、從現有快照建立新磁碟區，以及從快照還原磁碟區資料。 
+---
+= 使用 Trident Volume 群組快照
+:hardbreaks:
+:allow-uri-read: 
+:icons: font
+:imagesdir: ../media/
+
+
+[role="lead"]
+Kubernetes 持久性磁碟區（PV）的磁碟區群組快照 NetApp Trident 提供建立多個磁碟區快照（磁碟區快照群組）的功能。此磁碟區群組快照代表在同一時間點從多個磁碟區取得的複本。
+
+
+NOTE: VolumeGroupSnapshot 是 Kubernetes 中的一項測試版功能，使用測試版 API。Kubernetes 1.32 是 VolumeGroupSnapshot 的最低版本要求。
+
+
+
+[[create-volume-group-snapshots]]
+== 建立 Volume Group 快照
+
+以下儲存驅動程式支援 Volume group snapshot：
+
+* `ontap-san` driver - 僅適用於 iSCSI 和 FC 協定，不適用於 NVMe/TCP 協定。
+* `ontap-san-economy` - 僅適用於 iSCSI 協定。
+* `ontap-nas`
+
+
+
+NOTE: NetApp ASA r2 或 AFX 儲存系統不支援 Volume group snapshot。
+
+.開始之前
+* 請確保您的 Kubernetes 版本為 K8s 1.32 或更高版本。
+* 若要使用快照，您必須擁有外部快照控制器和自訂資源定義（CRD）。這是 Kubernetes 編排器（例如：Kubeadm、GKE、OpenShift）的職責。
++
+如果您的 Kubernetes 發行版不包含外部快照控制器和 CRD ，請參閱 <<部署 Volume Snapshot Controller>> 。
+
++
+
+NOTE: 如果要在 GKE 環境中建立按需磁碟區組快照，請勿建立快照控制器。GKE 使用內建的隱藏快照控制器。
+
+* 在快照控制器 YAML 中，將 `CSIVolumeGroupSnapshot` 功能閘設定為 'true'，以確保啟用磁碟區群組快照。
+* 在建立磁碟區群組快照之前，請先建立所需的磁碟區群組快照類別。
+* 確保所有 PVC/ 磁碟區都在同一 SVM 上、才能建立 VolumeGroupSnapshot。
+
+
+.步驟
+* 在建立 VolumeGroupSnapshot 之前，請先建立 VolumeGroupSnapshotClass。如需詳細資訊，請參閱 link:../trident-reference/objects.html#kubernetes-volumegroupsnapshotclass-objects["VolumeGroupSnapshotClass"]。
++
+[source, yaml]
+----
+apiVersion: groupsnapshot.storage.k8s.io/v1beta1
+kind: VolumeGroupSnapshotClass
+metadata:
+  name: csi-group-snap-class
+  annotations:
+    kubernetes.io/description: "Trident group snapshot class"
+driver: csi.trident.netapp.io
+deletionPolicy: Delete
+----
+* 使用現有的儲存類別建立具有所需標籤的 PVC，或將這些標籤新增至現有的 PVC。
++
+以下範例使用  `pvc1-group-snap` 作為資料來源和標籤  `consistentGroupSnapshot: groupA` 建立 PVC。請根據您的需求定義標籤的鍵和值。
+
+
+
+[listing]
+----
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: pvc1-group-snap
+  labels:
+    consistentGroupSnapshot: groupA
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Mi
+  storageClassName: sc1-1
+----
+* 建立具有與 PVC 中指定的標籤(`consistentGroupSnapshot: groupA`相同的 VolumeGroupSnapshot。
++
+此範例會建立磁碟區群組快照：
+
+
+
+[listing]
+----
+apiVersion: groupsnapshot.storage.k8s.io/v1beta1
+kind: VolumeGroupSnapshot
+metadata:
+  name: "vgs1"
+  namespace: trident
+spec:
+  volumeGroupSnapshotClassName: csi-group-snap-class
+  source:
+    selector:
+      matchLabels:
+        consistentGroupSnapshot: groupA
+----
+
+
+[[recover-volume-data-using-a-group-snapshot]]
+== 使用群組快照恢復磁碟區資料
+
+您可以使用作為 Volume Group Snapshot 一部分建立的個別快照來還原個別 Persistent Volume 。您無法將 Volume Group Snapshot 作為一個單元進行還原。
+
+使用 volume snapshot restore ONTAP CLI 將磁碟區還原到先前快照中記錄的狀態。
+
+[listing]
+----
+cluster1::*> volume snapshot restore -vserver vs0 -volume vol3 -snapshot vol3_snap_archive
+----
+
+NOTE: 還原 Snapshot 複本時、現有的 Volume 組態會被覆寫。建立 Snapshot 複本後對 Volume 資料所做的變更將會遺失。
+
+
+
+[[in-place-volume-restoration-from-a-snapshot]]
+== 從快照進行就地 Volume 還原
+
+Trident 使用  `TridentActionSnapshotRestore` (TASR) CR 從快照快速進行原廠磁碟區復原。此 CR 作為一項命令式 Kubernetes 操作運行，操作完成後不會持久保存。
+
+如需詳細資訊，請參閱 link:../trident-use/vol-snapshots.html#in-place-volume-restoration-from-a-snapshot["從快照進行就地 Volume 還原"]。
+
+
+
+[[delete-a-pv-with-associated-group-snapshots]]
+== 刪除具有相關群組快照的 PV
+
+刪除群組 Volume 快照時：
+
+* 您可以整體刪除 VolumeGroupSnapshots，而不是刪除群組中的單一快照。
+* 如果刪除 PersistentVolumes 時該 PersistentVolume 已存在快照，Trident 會將該磁碟區移至「刪除中」狀態，因為必須先移除快照才能安全地移除該磁碟區。
+* 如果使用分組快照建立了複本，然後要刪除該群組，則會開始複本分割作業，並且在分割完成之前無法刪除該群組。
+
+
+
+
+[[deploy-a-volume-snapshot-controller]]
+== 部署 Volume Snapshot Controller
+
+如果您的 Kubernetes 發行版不包含快照控制器和 CRD、您可以依照下列方式部署它們。
+
+.步驟
+. 建立 Volume Snapshot CRD。
++
+[listing]
+----
+cat snapshot-setup.sh
+----
++
+[source, sh]
+----
+#!/bin/bash
+# Create volume snapshot CRDs
+kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/release-8.2/client/config/crd/groupsnapshot.storage.k8s.io_volumegroupsnapshotclasses.yaml
+kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/release-8.2/client/config/crd/groupsnapshot.storage.k8s.io_volumegroupsnapshotcontents.yaml
+kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/release-8.2/client/config/crd/groupsnapshot.storage.k8s.io_volumegroupsnapshots.yaml
+----
+. 建立 Snapshot Controller。
++
+[source, console]
+----
+kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/release-8.2/deploy/kubernetes/snapshot-controller/rbac-snapshot-controller.yaml
+----
++
+[source, console]
+----
+kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/release-8.2/deploy/kubernetes/snapshot-controller/setup-snapshot-controller.yaml
+----
++
+
+NOTE: 如有必要，請打開  `deploy/kubernetes/snapshot-controller/rbac-snapshot-controller.yaml` 並更新  `namespace` 到您的命名空間。
+
+
+
+
+
+[[related-links]]
+== 相關連結
+
+* link:../trident-reference/objects.html#kubernetes-volumegroupsnapshotclass-objects["VolumeGroupSnapshotClass"]
+* link:../trident-concepts/snapshots.html["Volume 快照"]
+

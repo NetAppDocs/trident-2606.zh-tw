@@ -1,0 +1,71 @@
+---
+settings:
+  name: Trident
+  downlevel: true
+  internal:
+    pdf_enabled: true
+  prod:
+    pdf_enabled: true
+    harmony_enabled: false
+  rss_page: trident-rn.html
+  versions:
+  - version-number: '26.06'
+    url: "/trident-2606"
+  - version-number: '26.10'
+    url: "/trident"
+  - version-number: '26.02'
+    url: "/trident-2602"
+  - version-number: '25.10'
+    url: "/trident-2510"
+  - version-number: '25.06'
+    url: "/trident-2506"
+  - version-number: '25.02'
+    url: "/trident-2502"
+  - version-number: '24.10'
+    url: "/trident-2410"
+  - version-number: '24.06'
+    url: "/trident-2406"
+  - version-number: '24.02'
+    url: "/trident-2402"
+  - version-number: '23.10'
+    url: "/trident-2310"
+  - version-number: '23.07'
+    url: "/trident-2307"
+  langs: zh-tw,us-en,de-de,es-es,fr-fr,it-it,pt-br,ja-jp,ko-kr,zh-cn
+sidebar:
+  entries:
+  - title: Trident 文件
+    url: "/index.html"
+  - title: 版本資訊
+    entries:
+    - title: 新增功能
+      url: "/trident-rn.html"
+    - title: 舊版
+      url: "/earlier-versions.html"
+    - title: Trident 對 ASA r2 儲存系統的支援
+      url: "/trident-asar2-support.html"
+    - title: 已知問題
+      url: "/known-issues.html"
+  - section: trident-get-started
+  - section: trident-install
+  - section: trident-use
+  - section: trident-managing-k8s
+  - section: trident-docker
+  - section: trident-reco
+  - section: trident-protect
+  - title: 部落格文章
+    url: "/blog-posts.html"
+  - title: 知識與支援
+    entries:
+    - title: 常見問題
+      url: "/faq.html"
+    - title: 疑難排解
+      url: "/troubleshooting.html"
+    - title: 取得協助
+      url: "/get-help.html"
+  - section: trident-reference
+  - title: 法律聲明
+    url: "/legal-notices.html"
+product-family:
+  name: Trident
+  repo: astra-family

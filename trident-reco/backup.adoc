@@ -1,0 +1,136 @@
+---
+sidebar: sidebar 
+permalink: trident-reco/backup.html 
+keywords: data protection, replication, dr, disaster recovery, snapmirror, back up, snapshot, element, volume replication 
+summary: 了解使用 Trident 建立的 Trident 和磁碟區的保護和復原選項。您應該為每個具有持久性要求的應用程式製定資料保護和復原策略。 
+---
+= Trident 資料保護與災難恢復
+:hardbreaks:
+:allow-uri-read: 
+:icons: font
+:imagesdir: ../media/
+
+
+[role="lead"]
+了解使用 Trident 建立的 Trident 和磁碟區的保護和復原選項。您應該為每個具有持久性要求的應用程式製定資料保護和復原策略。
+
+
+
+[[trident-replication-and-recovery]]
+== Trident 複寫與還原
+
+您可以建立備份，以便在災難發生時還原 Trident。
+
+
+
+[[trident-replication]]
+=== Trident 複寫
+
+Trident 使用 Kubernetes CRD 來儲存和管理自己的狀態，並使用 Kubernetes 叢集 etcd 來儲存其中繼資料。
+
+.步驟
+. 使用 link:https://kubernetes.io/docs/tasks/administer-cluster/configure-upgrade-etcd/#backing-up-an-etcd-cluster["Kubernetes：備份 etcd 叢集"^] 備份 Kubernetes 叢集 etcd。
+. 將備份檔案放置在 FlexVol 磁碟區上
++
+
+NOTE: NetApp 建議您使用 SnapMirror 關係，將 FlexVol 所在的 SVM 保護到另一個 SVM。
+
+
+
+
+
+[[trident-recovery]]
+=== Trident 恢復
+
+使用 Kubernetes CRD 和 Kubernetes 叢集 etcd 快照、您可以還原 Trident。
+
+.步驟
+. 從目的地 SVM 掛載包含 Kubernetes etcd 資料檔案和憑證的磁碟區到將設定為主節點的主機。
+. 複製 Kubernetes 叢集下的所有必要憑證  `/etc/kubernetes/pki` 以及 etcd 成員檔案  `/var/lib/etcd`。
+. 使用 link:https://kubernetes.io/docs/tasks/administer-cluster/configure-upgrade-etcd/#restoring-an-etcd-cluster["Kubernetes：還原 etcd 叢集"^] 從 etcd 備份還原 Kubernetes 叢集。
+. 執行 `kubectl get crd`以驗證所有 Trident 自訂資源是否已啟動，並擷取 Trident 物件以驗證所有資料是否可用。
+
+
+
+
+[[svm-replication-and-recovery]]
+== SVM 複製與復原
+
+Trident 無法設定複寫關係、但儲存管理員可以使用 https://docs.netapp.com/us-en/ontap/data-protection/snapmirror-svm-replication-concept.html["ONTAP SnapMirror"^]來複寫 SVM。
+
+發生災難時，您可以啟動 SnapMirror 目標 SVM 開始提供資料服務。系統復原後，您可以切換回主 SVM。
+
+.關於此任務
+使用 SnapMirror SVM 複製功能時，請考慮以下事項：
+
+* 您應該為每個啟用 SVM-DR 的 SVM 建立一個獨立的後端。
+* 配置儲存類別，僅在需要時選擇複寫後端，以避免將不需要複寫的磁碟區配置到支援 SVM-DR 的後端上。
+* 應用程式管理員應了解與複寫相關的額外成本和複雜性，並在開始此程序之前仔細考慮其恢復計畫。
+
+
+
+
+[[svm-replication]]
+=== SVM 複製
+
+您可以使用 link:https://docs.netapp.com/us-en/ontap/data-protection/snapmirror-svm-replication-workflow-concept.html["ONTAP：SnapMirror SVM 複製"^] 來建立 SVM 複寫關係。
+
+SnapMirror 允許您設定選項來控制要複寫的內容。執行 <<使用 Trident 進行 SVM 恢復>> 時，您需要知道選擇了哪些選項。
+
+* link:https://docs.netapp.com/us-en/ontap/data-protection/replicate-entire-svm-config-task.html["-identity-preserve true"^] 複製整個 SVM 組態。
+* link:https://docs.netapp.com/us-en/ontap/data-protection/exclude-lifs-svm-replication-task.html["-discard-configs network"^] 不包括 LIF 和相關網路設定。
+* link:https://docs.netapp.com/us-en/ontap/data-protection/exclude-network-name-service-svm-replication-task.html["-identity-preserve false"^] 僅複製磁碟區和安全性組態。
+
+
+
+
+[[svm-recovery-using-trident]]
+=== 使用 Trident 進行 SVM 恢復
+
+Trident 不會自動偵測 SVM 故障。發生災難時、管理員可以手動啟動 Trident 容錯移轉至新的 SVM。
+
+.步驟
+. 取消已排程和正在進行的 SnapMirror 傳輸、中斷複寫關係、停止來源 SVM、然後啟動 SnapMirror 目的地 SVM。
+. 如果您在設定 SVM 複寫時指定了 `-identity-preserve false`或 `-discard-config network`，請更新 Trident 後端定義檔中的 `managementLIF`和 `dataLIF`。
+. 確認 `storagePrefix`已存在於 Trident 後端定義檔中。此參數不可更改。省略 `storagePrefix`將導致後端更新失敗。
+. 使用下列命令更新所有必要的後端，以反映新的目的地 SVM 名稱：
++
+[listing]
+----
+./tridentctl update backend <backend-name> -f <backend-json-file> -n <namespace>
+----
+. 如果您指定了 `-identity-preserve false`或 `discard-config network`，則必須重新啟動所有應用程式 pod。
++
+
+NOTE: 如果您指定了 `-identity-preserve true`，則當目標 SVM 啟動時，Trident 配置的所有磁碟區都會開始提供資料服務。
+
+
+
+
+
+[[volume-replication-and-recovery]]
+== Volume 複寫與還原
+
+Trident 無法設定 SnapMirror 複製關係，但儲存管理員可以使用 link:https://docs.netapp.com/us-en/ontap/data-protection/snapmirror-disaster-recovery-concept.html["ONTAP SnapMirror 複製和恢復"^] 來複製由 Trident 建立的磁碟區。
+
+然後，您可以使用 link:../trident-use/vol-import.html["tridentctl volume import"] 將復原的磁碟區匯入到 Trident 中。
+
+
+NOTE: 此  `ontap-san-economy` 驅動程式支援磁碟區匯入。使用此  `ontap-nas-economy` 驅動程式匯入 Qtree 是一項技術預覽功能，不支援在生產環境中使用。此  `ontap-flexgroup-economy` 驅動程式不支援匯入。如需詳細資訊，請參閱 link:../trident-use/vol-import.html["匯入 Trident Volume"]。
+
+
+
+[[snapshot-data-protection]]
+== 快照資料保護
+
+您可以使用以下方法保護和還原資料：
+
+* 外部快照控制器和 CRD 用於建立持久磁碟區（PV）的 Kubernetes 磁碟區快照。
++
+link:../trident-use/vol-snapshots.html["Volume 快照"]
+
+* ONTAP 快照可還原磁碟區的全部內容，或還原個別檔案或 LUN。
++
+link:https://docs.netapp.com/us-en/ontap/data-protection/manage-local-snapshot-copies-concept.html["ONTAP Snapshot"^]
+
+

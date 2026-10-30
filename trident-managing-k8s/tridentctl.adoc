@@ -1,0 +1,329 @@
+---
+sidebar: sidebar 
+permalink: trident-managing-k8s/tridentctl.html 
+keywords: tridentctl, trident, kubernetes, commands, options, usage, flags 
+summary: 深入瞭解 tridentctl，這是一個命令列公用程式，可提供對 Trident 的簡易存取。 
+---
+= 使用 tridentctl 管理 Trident
+:hardbreaks:
+:allow-uri-read: 
+:icons: font
+:imagesdir: ../media/
+
+
+[role="lead"]
+該軟體包 https://github.com/NetApp/trident/releases["Trident 安裝程式套件"^]包含 `tridentctl`命令列實用程序，方便用戶輕鬆存取 Trident。擁有足夠權限的 Kubernetes 使用者可以使用它來安裝 Trident 或管理包含 Trident Pod 的命名空間。
+
+
+
+[[commands-and-global-flags]]
+== 命令和全域標誌
+
+您可以執行 `tridentctl help`以取得 `tridentctl`的可用命令清單，或將 `--help`旗標附加至任何命令，以取得該特定命令的選項和旗標清單。
+
+`tridentctl [command] [--optional-flag]`
+
+Trident `tridentctl` 工具支援以下指令和全域標誌。
+
+.命令
+[%collapsible]
+====
+`create`:: 將資源新增至 Trident。
+`delete`:: 從 Trident 移除一個或多個資源。
+`get`:: 從 Trident 取得一或多個資源。
+`help`:: 關於任何命令的說明。
+`images`:: 列印一份 Trident 所需容器映像的表格。
+`import`:: 將現有資源匯入 Trident。
+`install`:: 安裝 Trident。
+`logs`:: 列印 Trident 的日誌。
+`send`:: 從 Trident 傳送資源。
+`uninstall`:: 卸載 Trident。
+`update`:: 在 Trident 中修改資源。
+`update backend state`:: 暫時停止後端作業。
+`upgrade`:: 在 Trident 中升級資源。
+`version`:: 列印 Trident 的版本。
+
+
+====
+.全域旗標
+[%collapsible]
+====
+`-d`, `--debug`:: 偵錯輸出。
+`-h`, `--help`:: 的說明 `tridentctl`。
+`-k`, `--kubeconfig string`:: 指定  `KUBECONFIG` 路徑，以便在本機或從一個 Kubernetes 叢集到另一個 Kubernetes 叢集運行命令。
++
+--
+
+NOTE: 或者，您可以匯出  `KUBECONFIG` 變數以指向特定的 Kubernetes 叢集，並向該叢集發出  `tridentctl` 命令。
+
+--
+`-n`, `--namespace string`:: Trident 部署的命名空間。
+`-o`, `--output string`:: 輸出格式。json|yaml|name|wide|ps（預設）其中之一。
+`-s`, `--server string`:: Trident REST 介面的位址 / 連接埠。
++
+--
+
+WARNING: Trident REST 介面可以設定為僅監聽和提供服務於 127.0.0.1 （適用於 IPv4）或 [::1] （適用於 IPv6）。
+
+--
+
+
+====
+
+
+[[command-options-and-flags]]
+== 命令選項和標誌
+
+
+
+[[create]]
+=== 建立
+
+使用  `create` 指令將資源新增到 Trident。
+
+`tridentctl create [option]`
+
+選項:: `backend`：將後端新增至 Trident。
+
+
+
+
+[[delete]]
+=== 刪除
+
+使用  `delete` 指令從 Trident 移除一個或多個資源。
+
+`tridentctl delete [option]`
+
+選項:: `backend`：從 Trident 刪除一個或多個儲存後端。
+`snapshot`：從 Trident 刪除一個或多個 Volume 快照。
+`storageclass`：從 Trident 刪除一個或多個儲存類別。
+`volume`：從 Trident 刪除一個或多個儲存 Volume 。
+
+
+
+
+[[get]]
+=== 取得
+
+使用  `get` 指令從 Trident 取得一個或多個資源。
+
+`tridentctl get [option]`
+
+選項:: `backend`：從 Trident 取得一個或多個儲存後端。
+`snapshot`：從 Trident 取得一個或多個快照。
+`storageclass`：從 Trident 取得一個或多個儲存類別。
+`volume`：從 Trident 取得一個或多個磁碟區。
+旗標:: `-h`, `--help`：磁碟區的說明。
+`--parentOfSubordinate string`：將查詢限制為從屬來源磁碟區。
+`--subordinateOf string`：將查詢限制為磁碟區的從屬磁碟區。
+
+
+
+
+[[images]]
+=== 映像
+
+使用  `images` 標誌列印 Trident 所需的容器映像表格。
+
+`tridentctl images [flags]`
+
+旗標:: `-h`, `--help`:圖像幫助。
+`-v`, `--k8s-version string`:Kubernetes 叢集的語意版本。
+
+
+
+
+[[import-volume]]
+=== 匯入磁碟區
+
+使用  `import volume` 指令將現有磁碟區導入 Trident。
+
+`tridentctl import volume <backendName> <volumeName> [flags]`
+
+別名:: `volume`, `v`
+旗標:: `-f`, `--filename string`: YAML 或 JSON PVC 檔案的路徑。
+`-h`, `--help`: 卷的幫助資訊。
+`--no-manage`: 僅建立 PV/PVC。不進行磁碟區生命週期管理。
+
+
+
+
+[[install]]
+=== 安裝
+
+使用  `install` 標誌安裝 Trident。
+
+`tridentctl install [flags]`
+
+旗標:: `--autosupport-image string`：自動支援遙測的容器映像（預設值為「netapp/trident autosupport:<current-version>」）。
+`--autosupport-proxy string`：用於發送自動支援遙測的代理程式的位址/連接埠。
+`--enable-node-prep`：嘗試在節點上安裝所需的軟體包。
+`--generate-custom-yaml`：產生 YAML 檔案而不進行任何安裝。
+`-h`, `--help`：安裝幫助。
+`--http-request-timeout`：覆蓋 Trident 控制器 REST API 的 HTTP 請求逾時時間（預設值為 1m30s）。
+`--image-registry string`：內部鏡像倉庫的位址/連接埠。
+`--k8s-timeout duration`：所有 Kubernetes 操作的逾時時間（預設值為 3m0s）。
+`--kubelet-dir string`：kubelet 內部狀態的主機位置（預設值為「/var/lib/kubelet」）。
+`--log-format string`：Trident 日誌格式（text、json）（預設值為「text」）。
+`--node-prep`：啟用 Trident 使 Kubernetes 叢集的節點能夠使用指定的資料儲存協定管理磁碟區。*目前， `iscsi`是唯一支援的值。從 OpenShift 4.19 版本開始，此功能支援的最低 Trident 版本為 25.06.1。*
+`--pv string`：Trident 使用的舊版 PV 名稱，確保該 PV 不存在（預設值為「trident」）。
+`--pvc string`：Trident 使用的舊版 PVC 名稱，確保該 PVC 不存在（預設值為「trident」）。
+`--silence-autosupport`：不自動發送自動支援包至 NetApp（預設值為 true）。
+`--silent`：安裝期間停用大部分輸出。
+`--trident-image string`：要安裝的 Trident 鏡像。
+`--k8s-api-qps`：Kubernetes API 請求的每秒查詢數（QPS）限制（預設值為 100；可選）。
+`--use-custom-yaml`：使用 setup 目錄中存在的任何 YAML 檔案。
+`--use-ipv6`：Trident 通訊使用 IPv6。
+
+
+
+
+[[logs]]
+=== 日誌
+
+使用  `logs` 標誌列印 Trident 的日誌。
+
+`tridentctl logs [flags]`
+
+旗標:: `-a`, `--archive`：除非另有指定，否則建立包含所有日誌的支援存檔。
+`-h`, `--help`：日誌說明。
+`-l`, `--log string`：要顯示的 Trident 日誌。可選值包含 trident|auto|trident-operator|all（預設值為 "auto"）。
+`--node string`：要從中收集節點 Pod 日誌的 Kubernetes 節點名稱。
+`-p`, `--previous`：如果存在，則取得上一個容器執行個體的日誌。
+`--sidecars`：取得 Sidecar 容器的日誌。
+
+
+
+
+[[send]]
+=== 傳送
+
+使用  `send` 指令從 Trident 傳送資源。
+
+`tridentctl send [option]`
+
+選項:: `autosupport`：將 Autosupport 歸檔傳送至 NetApp。
+
+
+
+
+[[uninstall]]
+=== 解除安裝
+
+使用 `uninstall` 標誌卸載 Trident 。
+
+`tridentctl uninstall [flags]`
+
+旗標:: `-h, --help`：卸載幫助。
+`--silent`：卸載過程中停用大部分輸出。
+
+
+
+
+[[update]]
+=== 更新
+
+使用  `update` 指令修改 Trident 中的資源。
+
+`tridentctl update [option]`
+
+選項:: `backend`：在 Trident 中更新後端。
+
+
+
+
+[[update-backend-state]]
+=== 更新後端狀態
+
+使用  `update backend state` 命令可以暫停或恢復後端操作。
+
+`tridentctl update backend state <backend-name> [flag]`
+
+.需要考慮的要點
+* 如果後端是使用 TridentBackendConfig（tbc）建立的，則無法使用 `backend.json`檔案更新後端。
+* 如果 `userState`已在 tbc 中設置，則無法使用 `tridentctl update backend state <backend-name> --user-state suspended/normal`命令對其進行修改。
+* 若要恢復透過 tridentctl 設定  `userState` 的功能（此欄位已透過 tbc 設定），必須先從 tbc 移除  `userState` 欄位。這可以透過  `kubectl edit tbc` 命令完成。移除  `userState` 欄位後，您可以使用  `tridentctl update backend state` 命令變更後端的  `userState`。
+* 使用 `tridentctl update backend state`來更改 `userState`。你也可以使用 `TridentBackendConfig`或 `backend.json`檔案來更新 `userState`；這會觸發後端的完整重新初始化，並且可能會花費較多時間。
++
+旗標:: `-h`, `--help`:後端狀態說明。
+`--user-state`:設定為 `suspended`可暫停後端操作。設定為 `normal`可恢復後端操作。設定為 `suspended`時:
+
+
+* `AddVolume` 和  `Import Volume` 已暫停。
+* `CloneVolume`, `ResizeVolume`, `PublishVolume`, `UnPublishVolume`, `CreateSnapshot`, `GetSnapshot`, `RestoreSnapshot`, `DeleteSnapshot`, `RemoveVolume`, `GetVolumeExternal`, `ReconcileNodeAccess` 仍然可用。
+
+
+您也可以使用 `userState`欄位在後端組態檔 `TridentBackendConfig`或 `backend.json`中更新後端狀態。如需更多資訊，請參閱link:../trident-use/backend_options.html["管理後端的選項"]和link:../trident-use/backend_ops_kubectl.html["使用 kubectl 執行後端管理"]。
+
+* 範例： *
+
+[role="tabbed-block"]
+====
+.JSON
+--
+請按照以下步驟，使用 `userState`檔案來更新 `backend.json`：
+
+. 編輯  `backend.json` 檔案以包含  `userState` 欄位，並將其值設為「suspended」。
+. 使用  `tridentctl update backend` 命令和更新的  `backend.json` 檔案路徑來更新後端。
++
+*範例*： `tridentctl update backend  -f /<path to backend JSON file>/backend.json -n trident`
+
+
+
+[listing]
+----
+{
+  "version": 1,
+  "storageDriverName": "ontap-nas",
+  "managementLIF": "<redacted>",
+  "svm": "nas-svm",
+  "backendName": "customBackend",
+  "username": "<redacted>",
+  "password": "<redacted>",
+  "userState": "suspended"
+}
+
+----
+--
+.YAML
+--
+您可以使用  `kubectl edit <tbc-name> -n <namespace>` 指令在套用 tbc 後對其進行編輯。以下範例使用  `userState: suspended` 選項將後端狀態更新為暫停：
+
+[source, yaml]
+----
+apiVersion: trident.netapp.io/v1
+kind: TridentBackendConfig
+metadata:
+  name: backend-ontap-nas
+spec:
+  version: 1
+  backendName: customBackend
+  storageDriverName: ontap-nas
+  managementLIF: <redacted>
+  svm: nas-svm
+  userState: suspended
+  credentials:
+    name: backend-tbc-ontap-nas-secret
+----
+--
+====
+
+
+[[version]]
+=== 版本
+
+使用 `version`標誌列印 `tridentctl`和正在執行的 Trident 服務的版本。
+
+`tridentctl version [flags]`
+
+旗標:: `--client`：僅限客戶端版本（無需伺服器）。
+`-h, --help`：版本說明。
+
+
+
+
+[[plugin-support]]
+== 外掛程式支援
+
+Tridentctl 支援類似 kubectl 的插件。如果外掛程式二進位檔案名稱遵循「tridentctl-<plugin>」格式，且該二進位檔案位於 PATH 環境變數指定的資料夾中，Tridentctl 就會偵測到該外掛程式。所有偵測到的外掛程式都會列在 tridentctl help 的插件部分。此外，您也可以透過在環境變數 TRIDENTCTL_PLUGIN_PATH 中指定插件資料夾來縮小搜尋範圍（例如： `TRIDENTCTL_PLUGIN_PATH=~/tridentctl-plugins/`）。如果使用此變數，tridentctl 將僅在指定的資料夾中搜尋。
